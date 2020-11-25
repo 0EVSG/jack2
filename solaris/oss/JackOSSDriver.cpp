@@ -237,8 +237,6 @@ int JackOSSDriver::OpenInput()
     int cur_sample_format;
     jack_nframes_t cur_sample_rate;
 
-    if (fCaptureChannels == 0) fCaptureChannels = 2;
-
     if ((fInFD = open(fCaptureDriverName, O_RDONLY | ((fExcl) ? O_EXCL : 0))) < 0) {
         jack_error("JackOSSDriver::OpenInput failed to open device : %s@%i, errno = %d", __FILE__, __LINE__, errno);
         return -1;
@@ -251,6 +249,15 @@ int JackOSSDriver::OpenInput()
             jack_error("JackOSSDriver::OpenInput failed to set cooked mode : %s@%i, errno = %d", __FILE__, __LINE__, errno);
             goto error;
         }
+    }
+
+    cur_capture_channels = fCaptureChannels;
+    if (ioctl(fInFD, SNDCTL_DSP_CHANNELS, &fCaptureChannels) == -1) {
+        jack_error("JackOSSDriver::OpenInput failed to set channels : %s@%i, errno = %d", __FILE__, __LINE__, errno);
+        goto error;
+    }
+    if (cur_capture_channels != fCaptureChannels) {
+        jack_info("JackOSSDriver::OpenInput driver forced the number of capture channels %ld", fCaptureChannels);
     }
 
     gFragFormat = (2 << 16) + int2pow2(fEngineControl->fBufferSize * fSampleSize * fCaptureChannels);
@@ -268,15 +275,6 @@ int JackOSSDriver::OpenInput()
         jack_info("JackOSSDriver::OpenInput driver forced the sample format %ld", fSampleFormat);
     }
 
-    cur_capture_channels = fCaptureChannels;
-    if (ioctl(fInFD, SNDCTL_DSP_CHANNELS, &fCaptureChannels) == -1) {
-        jack_error("JackOSSDriver::OpenInput failed to set channels : %s@%i, errno = %d", __FILE__, __LINE__, errno);
-        goto error;
-    }
-    if (cur_capture_channels != fCaptureChannels) {
-        jack_info("JackOSSDriver::OpenInput driver forced the number of capture channels %ld", fCaptureChannels);
-    }
-
     cur_sample_rate = fEngineControl->fSampleRate;
     if (ioctl(fInFD, SNDCTL_DSP_SPEED, &fEngineControl->fSampleRate) == -1) {
         jack_error("JackOSSDriver::OpenInput failed to set sample rate : %s@%i, errno = %d", __FILE__, __LINE__, errno);
@@ -292,7 +290,7 @@ int JackOSSDriver::OpenInput()
         goto error;
     }
 
-    if (fInputBufferSize != fEngineControl->fBufferSize * fSampleSize * fCaptureChannels) {
+    if (fInputBufferSize < fEngineControl->fBufferSize * fSampleSize * fCaptureChannels) {
        if (fIgnoreHW) {
            int new_buffer_size = fInputBufferSize / (fSampleSize * fCaptureChannels);
            jack_info("JackOSSDriver::OpenInput driver forced buffer size %ld", new_buffer_size);
@@ -375,7 +373,7 @@ int JackOSSDriver::OpenOutput()
         goto error;
     }
 
-    if (fOutputBufferSize != fEngineControl->fBufferSize * fSampleSize * fPlaybackChannels) {
+    if (fOutputBufferSize < fEngineControl->fBufferSize * fSampleSize * fPlaybackChannels) {
        if (fIgnoreHW) {
            int new_buffer_size = fOutputBufferSize / (fSampleSize * fPlaybackChannels);
            jack_info("JackOSSDriver::OpenOutput driver forced buffer size %ld", new_buffer_size);
