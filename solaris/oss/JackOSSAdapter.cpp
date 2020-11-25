@@ -355,7 +355,7 @@ int JackOSSAdapter::OpenInput()
         goto error;
     }
 
-    if (fInputBufferSize != fAdaptedBufferSize * fSampleSize * fCaptureChannels) {
+    if (fInputBufferSize < fAdaptedBufferSize * fSampleSize * fCaptureChannels) {
        if (fIgnoreHW) {
            jack_info("JackOSSAdapter::OpenInput driver forced buffer size %ld", fOutputBufferSize);
        } else {
@@ -441,7 +441,7 @@ int JackOSSAdapter::OpenOutput()
         goto error;
     }
 
-    if (fOutputBufferSize != fAdaptedBufferSize * fSampleSize * fPlaybackChannels) {
+    if (fOutputBufferSize < fAdaptedBufferSize * fSampleSize * fPlaybackChannels) {
        if (fIgnoreHW) {
            jack_info("JackOSSAdapter::OpenOutput driver forced buffer size %ld", fOutputBufferSize);
        } else {
