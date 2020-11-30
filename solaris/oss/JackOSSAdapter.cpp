@@ -44,9 +44,15 @@ static inline void CopyAndConvertIn(jack_sample_t *dst, void *src, size_t nframe
 			break;
         }
 		case 24: {
+#ifdef __FreeBSD__
+			char *s24src = (char*)src;
+			s24src += channel * 3;
+			sample_move_dS_s24(dst, s24src, nframes, chcount*3);
+#else
 			signed int *s32src = (signed int*)src;
             s32src += channel;
             sample_move_dS_s24(dst, (char*)s32src, nframes, chcount<<2);
+#endif
 			break;
         }
 		case 32: {
@@ -69,9 +75,15 @@ static inline void CopyAndConvertOut(void *dst, jack_sample_t *src, size_t nfram
 			break;
         }
 		case 24: {
+#ifdef __FreeBSD__
+			char *s24dst = (char*)dst;
+			s24dst += channel * 3;
+			sample_move_d24_sS(s24dst, src, nframes, chcount*3, NULL);
+#else
 			signed int *s32dst = (signed int*)dst;
             s32dst += channel;
             sample_move_d24_sS((char*)s32dst, src, nframes, chcount<<2, NULL); // No dithering for now...
+#endif
 			break;
         }
 		case 32: {
@@ -89,7 +101,11 @@ void JackOSSAdapter::SetSampleFormat()
 
 	    case 24:	/* native-endian LSB aligned 24-bits in 32-bits  integer */
             fSampleFormat = AFMT_S24_NE;
+#ifdef __FreeBSD__
+	    fSampleSize = 3;
+#else
             fSampleSize = sizeof(int);
+#endif
 			break;
 		case 32:	/* native-endian 32-bit integer */
             fSampleFormat = AFMT_S32_NE;
