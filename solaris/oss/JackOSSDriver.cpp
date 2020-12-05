@@ -318,8 +318,17 @@ int JackOSSDriver::OpenInput()
            JackAudioDriver::SetBufferSize(new_buffer_size); // never fails
            fInputBufferSize = fEngineControl->fBufferSize * fSampleSize * fCaptureChannels;
        } else {
-           jack_error("JackOSSDriver::OpenInput wanted buffer size cannot be obtained");
-           goto error;
+#ifdef __FreeBSD__
+           if (ioctl(fInFD, SNDCTL_DSP_SETBLKSIZE, &fInputBufferSize) == -1) {
+               jack_error("JackOSSDriver::OpenInput failed to get fragments : %s@%i, errno = %d", __FILE__, __LINE__, errno);
+               goto error;
+           } else {
+               jack_error("JackOSSDriver::OpenInput wanted buffer size cannot be obtained");
+               goto error;
+           }
+#else
+               jack_error("JackOSSDriver::OpenInput wanted buffer size cannot be obtained");
+#endif
        }
     }
 
@@ -341,8 +350,6 @@ int JackOSSDriver::OpenOutput()
     int cur_playback_channels;
     jack_nframes_t cur_sample_rate;
 
-    if (fPlaybackChannels == 0) fPlaybackChannels = 2;
-
     if ((fOutFD = open(fPlaybackDriverName, O_WRONLY | ((fExcl) ? O_EXCL : 0))) < 0) {
        jack_error("JackOSSDriver::OpenOutput failed to open device : %s@%i, errno = %d", __FILE__, __LINE__, errno);
        return -1;
@@ -357,9 +364,18 @@ int JackOSSDriver::OpenOutput()
         }
     }
 
+    cur_playback_channels = fPlaybackChannels;
+    if (ioctl(fOutFD, SNDCTL_DSP_CHANNELS, &fPlaybackChannels) == -1) {
+        jack_error("JackOSSDriver::OpenOutput failed to set channels : %s@%i, errno = %d", __FILE__, __LINE__, errno);
+        goto error;
+    }
+    if (cur_playback_channels != fPlaybackChannels) {
+        jack_info("JackOSSDriver::OpenOutput driver forced the number of playback channels %ld", fPlaybackChannels);
+    }
+
     fOutputBufferSize = fEngineControl->fBufferSize * fSampleSize * fPlaybackChannels;
     gFragFormat = (2 << 16) + int2pow2(fOutputBufferSize);
-    if (!fIgnoreHW && (1 << (gFragFormat & 0x1f)) - fOutputBufferSize >= fSampleSize * fCaptureChannels) {
+    if (!fIgnoreHW && (1 << (gFragFormat & 0x1f)) - fOutputBufferSize >= fSampleSize * fPlaybackChannels) {
         // Not a power of 2 buffer size, request 8 quarter fragments for steady operation.
         gFragFormat = (8 << 16) + int2pow2(fOutputBufferSize >> 2);
     }
@@ -375,15 +391,6 @@ int JackOSSDriver::OpenOutput()
     }
     if (cur_sample_format != fSampleFormat) {
         jack_info("JackOSSDriver::OpenOutput driver forced the sample format %ld", fSampleFormat);
-    }
-
-    cur_playback_channels = fPlaybackChannels;
-    if (ioctl(fOutFD, SNDCTL_DSP_CHANNELS, &fPlaybackChannels) == -1) {
-        jack_error("JackOSSDriver::OpenOutput failed to set channels : %s@%i, errno = %d", __FILE__, __LINE__, errno);
-        goto error;
-    }
-    if (cur_playback_channels != fPlaybackChannels) {
-        jack_info("JackOSSDriver::OpenOutput driver forced the number of playback channels %ld", fPlaybackChannels);
     }
 
     cur_sample_rate = fEngineControl->fSampleRate;
@@ -407,8 +414,17 @@ int JackOSSDriver::OpenOutput()
            JackAudioDriver::SetBufferSize(new_buffer_size); // never fails
            fOutputBufferSize = fEngineControl->fBufferSize * fSampleSize * fPlaybackChannels;
        } else {
+#ifdef __FreeBSD__
+           if (ioctl(fInFD, SNDCTL_DSP_SETBLKSIZE, &fInputBufferSize) == -1) {
+               jack_error("JackOSSDriver::OpenOutput failed to get fragments : %s@%i, errno = %d", __FILE__, __LINE__, errno);
+               goto error;
+           } else {
+               jack_error("JackOSSDriver::OpenOutput wanted buffer size cannot be obtained");
+               goto error;
+           }
+#else
            jack_error("JackOSSDriver::OpenOutput wanted buffer size cannot be obtained");
-           goto error;
+#endif
        }
     }
 
