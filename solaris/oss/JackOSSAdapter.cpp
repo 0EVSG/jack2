@@ -382,11 +382,12 @@ int JackOSSAdapter::OpenInput()
            fInputBufferSize = fragment_size;
        } else {
 #ifdef __FreeBSD__
-           if (ioctl(fInFD, SNDCTL_DSP_SETBLKSIZE, &fInputBufferSize) == -1) {
+           int new_buffer_size = fInputBufferSize;
+           if (ioctl(fInFD, SNDCTL_DSP_SETBLKSIZE, &new_buffer_size) == -1) {
                jack_error("JackOSSAdapter::OpenInput failed to set fragments : %s@%i, errno = %d", __FILE__, __LINE__, errno);
                goto error;
-           } else {
-               jack_error("JackOSSAdapter::OpenInput wanted buffer size cannot be obtained");
+           } else if (new_buffer_size != fInputBufferSize) {
+               jack_error("JackOSSAdapter::OpenInput failed to set fragments : requested(%d), got(%d)", fInputBufferSize, new_buffer_size);
                goto error;
            }
 #else
@@ -484,11 +485,12 @@ int JackOSSAdapter::OpenOutput()
            fOutputBufferSize = fragment_size;
        } else {
 #ifdef __FreeBSD__
-           if (ioctl(fInFD, SNDCTL_DSP_SETBLKSIZE, &fInputBufferSize) == -1) {
+           int new_buffer_size = fOutputBufferSize;
+           if (ioctl(fInFD, SNDCTL_DSP_SETBLKSIZE, &new_buffer_size) == -1) {
                jack_error("JackOSSAdapter::OpenOutput failed to set fragments : %s@%i, errno = %d", __FILE__, __LINE__, errno);
                goto error;
-           } else {
-               jack_error("JackOSSAdapter::OpenOutput wanted buffer size cannot be obtained");
+           } else if (new_buffer_size != fOutputBufferSize) {
+               jack_error("JackOSSAdapter::OpenOutput failed to set fragments : requested(%d), got(%d)", fOutputBufferSize, new_buffer_size);
                goto error;
            }
 #else
