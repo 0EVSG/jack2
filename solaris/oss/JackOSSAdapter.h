@@ -80,6 +80,10 @@ class JackOSSAdapter : public JackAudioAdapterInterface, public JackRunnableInte
 
         bool fFirstCycle;
 
+        jack_nframes_t fOSSFragment;
+        jack_nframes_t fOSSInBuffer;
+        jack_nframes_t fOSSOutBuffer;
+
         int OpenInput();
         int OpenOutput();
         void CloseAux();

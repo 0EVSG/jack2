@@ -125,7 +125,8 @@ JackOSSAdapter::JackOSSAdapter(jack_nframes_t buffer_size, jack_nframes_t sample
                 fInFD(-1), fOutFD(-1), fBits(OSS_DRIVER_DEF_BITS),
                 fSampleFormat(0), fNperiods(OSS_DRIVER_DEF_NPERIODS), fRWMode(0), fIgnoreHW(true), fExcl(false),
                 fInputBufferSize(0), fOutputBufferSize(0),
-                fInputBuffer(NULL), fOutputBuffer(NULL), fFirstCycle(true)
+                fInputBuffer(NULL), fOutputBuffer(NULL), fFirstCycle(true),
+                fOSSFragment(0), fOSSInBuffer(0), fOSSOutBuffer(0)
 {
     const JSList* node;
     const jack_driver_param_t* param;
@@ -332,11 +333,13 @@ int JackOSSAdapter::OpenInput()
         }
     }
 
+#ifndef __FreeBSD__
     gFragFormat = (2 << 16) + int2pow2(fAdaptedBufferSize * fSampleSize * fCaptureChannels);
     if (ioctl(fInFD, SNDCTL_DSP_SETFRAGMENT, &gFragFormat) == -1) {
         jack_error("JackOSSAdapter::OpenInput failed to set fragments : %s@%i, errno = %d", __FILE__, __LINE__, errno);
         goto error;
     }
+#endif
 
     cur_sample_format = fSampleFormat;
     if (ioctl(fInFD, SNDCTL_DSP_SETFMT, &fSampleFormat) == -1) {
@@ -365,6 +368,53 @@ int JackOSSAdapter::OpenInput()
         jack_info("JackOSSAdapter::OpenInput driver forced the sample rate %ld", fAdaptedSampleRate);
     }
 
+#ifdef __FreeBSD__
+    fInputBufferSize = fAdaptedBufferSize * fSampleSize * fCaptureChannels;
+    if (!fIgnoreHW) {
+        audio_buf_info info = {0, 0, 0, 0};
+        if (ioctl(fInFD, SNDCTL_DSP_GETISPACE, &info) == -1 || info.fragsize <= 0 || info.fragstotal <= 0) {
+            jack_error("JackOSSAdapter::OpenInput failed to get buffer info : %s@%i, errno = %d", __FILE__, __LINE__, errno);
+            goto error;
+        }
+        fOSSInBuffer = info.fragstotal * info.fragsize / (fSampleSize * fCaptureChannels);
+
+        unsigned int frag_size = info.fragsize;
+        if (fOSSFragment < fAdaptedBufferSize) {
+            // Harmonize record and playback fragment size.
+            frag_size = fOSSFragment * fSampleSize * fCaptureChannels;
+            jack_info("JackOSSAdapter::OpenInput harmonize fragments to %d", frag_size);
+        } else if (frag_size > fInputBufferSize) {
+            // Smaller fragment size needed, try to match period exactly.
+            frag_size = (1U << int2pow2(fInputBufferSize));
+            frag_size -= frag_size % (fSampleSize * fCaptureChannels);
+            jack_info("JackOSSAdapter::OpenInput downsize fragments to %d", frag_size);
+        }
+        if ((fInputBufferSize % frag_size != 0) && (frag_size * 3U > fInputBufferSize)) {
+            // Fragment size may induce irregular timing, request a smaller one.
+            frag_size = fInputBufferSize / 6U;
+            jack_info("JackOSSAdapter::OpenInput divide fragments into %d", frag_size);
+        }
+
+        if ((fOSSInBuffer < fAdaptedBufferSize * (1 + fNperiods)) || (int)frag_size != info.fragsize) {
+            // Total recording buffer size too small, or inappropriate fragment size.
+            gFragFormat = int2pow2(frag_size);
+            frag_size = (1U << gFragFormat);
+            frag_size -= frag_size % (fSampleSize * fCaptureChannels);
+            gFragFormat |= ((fInputBufferSize * (1 + fNperiods) + frag_size - 1) / frag_size) << 16;
+            jack_info("JackOSSAdapter::OpenInput request %d fragments of %d", (gFragFormat >> 16), frag_size);
+            if (ioctl(fInFD, SNDCTL_DSP_SETFRAGMENT, &gFragFormat) == -1) {
+                jack_error("JackOSSAdapter::OpenInput failed to set fragments : %s@%i, errno = %d", __FILE__, __LINE__, errno);
+                goto error;
+            }
+            if (ioctl(fInFD, SNDCTL_DSP_GETISPACE, &info) == -1 || info.fragsize <= 0 || info.fragstotal <= 0) {
+                jack_error("JackOSSAdapter::OpenInput failed to get buffer info : %s@%i, errno = %d", __FILE__, __LINE__, errno);
+                goto error;
+            }
+            fOSSInBuffer = info.fragstotal * info.fragsize / (fSampleSize * fCaptureChannels);
+        }
+        fOSSFragment = info.fragsize / (fSampleSize * fCaptureChannels);
+    }
+#else
     fInputBufferSize = 0;
     if (ioctl(fInFD, SNDCTL_DSP_GETBLKSIZE, &fInputBufferSize) == -1) {
         jack_error("JackOSSAdapter::OpenInput failed to get fragments : %s@%i, errno = %d", __FILE__, __LINE__, errno);
@@ -379,6 +429,7 @@ int JackOSSAdapter::OpenInput()
            goto error;
        }
     }
+#endif
 
     fInputBuffer = (void*)calloc(fInputBufferSize, 1);
     assert(fInputBuffer);
@@ -418,11 +469,13 @@ int JackOSSAdapter::OpenOutput()
         }
     }
 
+#ifndef __FreeBSD__
     gFragFormat = (2 << 16) + int2pow2(fAdaptedBufferSize * fSampleSize * fPlaybackChannels);
     if (ioctl(fOutFD, SNDCTL_DSP_SETFRAGMENT, &gFragFormat) == -1) {
         jack_error("JackOSSAdapter::OpenOutput failed to set fragments : %s@%i, errno = %d", __FILE__, __LINE__, errno);
         goto error;
     }
+#endif
 
     cur_sample_format = fSampleFormat;
     if (ioctl(fOutFD, SNDCTL_DSP_SETFMT, &fSampleFormat) == -1) {
@@ -451,6 +504,53 @@ int JackOSSAdapter::OpenOutput()
         jack_info("JackOSSAdapter::OpenInput driver forced the sample rate %ld", fAdaptedSampleRate);
     }
 
+#ifdef __FreeBSD__
+    fOutputBufferSize = fAdaptedBufferSize * fSampleSize * fPlaybackChannels;
+    if (!fIgnoreHW) {
+        audio_buf_info info = {0, 0, 0, 0};
+        if (ioctl(fOutFD, SNDCTL_DSP_GETOSPACE, &info) == -1 || info.fragsize <= 0 || info.fragstotal <= 0) {
+            jack_error("JackOSSAdapter::OpenOutput failed to get buffer info : %s@%i, errno = %d", __FILE__, __LINE__, errno);
+            goto error;
+        }
+        fOSSOutBuffer = info.fragstotal * info.fragsize / (fSampleSize * fPlaybackChannels);
+
+        unsigned int frag_size = info.fragsize;
+        if (fOSSFragment < fAdaptedBufferSize) {
+            // Harmonize record and playback fragment size.
+            frag_size = fOSSFragment * fSampleSize * fPlaybackChannels;
+            jack_info("JackOSSAdapter::OpenOutput harmonize fragments to %d", frag_size);
+        } else if (frag_size > fOutputBufferSize) {
+            // Smaller fragment size needed, try to match period exactly.
+            frag_size = (1U << int2pow2(fOutputBufferSize));
+            frag_size -= frag_size % (fSampleSize * fPlaybackChannels);
+            jack_info("JackOSSAdapter::OpenOutput downsize fragments to %d", frag_size);
+        }
+        if ((fOutputBufferSize % frag_size != 0) && (frag_size * 3U > fOutputBufferSize)) {
+            // Fragment size may induce irregular timing, request a smaller one.
+            frag_size = fOutputBufferSize / 6U;
+            jack_info("JackOSSAdapter::OpenOutput divide fragments into %d", frag_size);
+        }
+
+        if ((fOSSOutBuffer < fAdaptedBufferSize * (1 + fNperiods)) || (int)frag_size != info.fragsize) {
+            // Total playback buffer size too small, or inappropriate fragment size.
+            gFragFormat = int2pow2(frag_size);
+            frag_size = (1U << gFragFormat);
+            frag_size -= frag_size % (fSampleSize * fPlaybackChannels);
+            gFragFormat |= ((fOutputBufferSize * (1 + fNperiods) + frag_size - 1) / frag_size) << 16;
+            jack_info("JackOSSAdapter::OpenOutput request %d fragments of %d", (gFragFormat >> 16), frag_size);
+            if (ioctl(fOutFD, SNDCTL_DSP_SETFRAGMENT, &gFragFormat) == -1) {
+                jack_error("JackOSSAdapter::OpenOutput failed to set fragments : %s@%i, errno = %d", __FILE__, __LINE__, errno);
+                goto error;
+            }
+            if (ioctl(fOutFD, SNDCTL_DSP_GETOSPACE, &info) == -1 || info.fragsize <= 0 || info.fragstotal <= 0) {
+                jack_error("JackOSSAdapter::OpenOutput failed to get buffer info : %s@%i, errno = %d", __FILE__, __LINE__, errno);
+                goto error;
+            }
+            fOSSOutBuffer = info.fragstotal * info.fragsize / (fSampleSize * fPlaybackChannels);
+        }
+        fOSSFragment = info.fragsize / (fSampleSize * fPlaybackChannels);
+    }
+#else
     fOutputBufferSize = 0;
     if (ioctl(fOutFD, SNDCTL_DSP_GETBLKSIZE, &fOutputBufferSize) == -1) {
         jack_error("JackOSSAdapter::OpenOutput failed to get fragments : %s@%i, errno = %d", __FILE__, __LINE__, errno);
@@ -465,6 +565,7 @@ int JackOSSAdapter::OpenOutput()
            goto error;
        }
     }
+#endif
 
     fOutputBuffer = (void*)calloc(fOutputBufferSize, 1);
     assert(fOutputBuffer);
@@ -487,6 +588,8 @@ error:
 
 int JackOSSAdapter::Open()
 {
+    fOSSFragment = fAdaptedBufferSize;
+
     SetSampleFormat();
 
     if ((fRWMode & kRead) && (OpenInput() < 0)) {

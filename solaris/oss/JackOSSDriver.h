@@ -66,6 +66,10 @@ class JackOSSDriver : public JackAudioDriver
 
         bool fFirstCycle;
 
+        jack_nframes_t fOSSFragment;
+        jack_nframes_t fOSSInBuffer;
+        jack_nframes_t fOSSOutBuffer;
+
         int OpenInput();
         int OpenOutput();
         int OpenAux();
@@ -83,7 +87,8 @@ class JackOSSDriver : public JackAudioDriver
                 fInFD(-1), fOutFD(-1), fBits(0),
                 fSampleFormat(0), fNperiods(0), fRWMode(0), fExcl(false), fIgnoreHW(true),
                 fInputBufferSize(0), fOutputBufferSize(0),
-                fInputBuffer(NULL), fOutputBuffer(NULL), fFirstCycle(true)
+                fInputBuffer(NULL), fOutputBuffer(NULL), fFirstCycle(true),
+                fOSSFragment(0), fOSSInBuffer(0), fOSSOutBuffer(0)
         {}
 
         virtual ~JackOSSDriver()
