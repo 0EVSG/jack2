@@ -873,6 +873,22 @@ int JackOSSDriver::Read()
     }
 #endif
 
+    static unsigned int sample_count = 0;
+    if (count > 0) {
+        sample_count += count / (fSampleSize * fCaptureChannels);
+    }
+    static unsigned int cycle_count = 0;
+    if (++cycle_count % 1000 == 0) {
+        oss_count_t ptr;
+        if (ioctl(fInFD, SNDCTL_DSP_CURRENT_IPTR, &ptr) != -1) {
+            jack_info("JackOSSDriver::Read recording samples = %ld, fifo_samples = %d", ptr.samples, ptr.fifo_samples);
+        }
+        if (fOutFD > 0 && ioctl(fOutFD, SNDCTL_DSP_CURRENT_OPTR, &ptr) != -1) {
+            jack_info("JackOSSDriver::Read playback samples = %ld, fifo_samples = %d", ptr.samples, ptr.fifo_samples);
+        }
+        jack_info("JackOSSDriver::Read total recorded samples = %ld", sample_count);
+    }
+
 #ifdef JACK_MONITOR
     if (count > 0 && count != (int)fInputBufferSize)
         jack_log("JackOSSDriver::Read count = %ld", count / (fSampleSize * fCaptureChannels));
@@ -1008,6 +1024,15 @@ int JackOSSDriver::Write()
     gCycleTable.fTable[gCycleCount].fAfterWrite = GetMicroSeconds();
     gCycleCount = (gCycleCount == CYCLE_POINTS - 1) ? gCycleCount: gCycleCount + 1;
   #endif
+
+    static unsigned int sample_count = 0;
+    if (count > 0) {
+        sample_count += count / (fSampleSize * fPlaybackChannels);
+    }
+    static unsigned int cycle_count = 0;
+    if (++cycle_count % 1000 == 0) {
+        jack_info("JackOSSDriver::Write total played samples = %ld", sample_count);
+    }
 
     // XRun detection
     if (ioctl(fOutFD, SNDCTL_DSP_GETERROR, &ei_out) == 0) {
