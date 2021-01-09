@@ -76,6 +76,7 @@ class JackOSSDriver : public JackAudioDriver
         void CloseAux();
         void SetSampleFormat();
         void DisplayDeviceInfo();
+        int WriteSilence(unsigned int size);
 
         // Redefining since timing for CPU load is specific
         int ProcessSync();

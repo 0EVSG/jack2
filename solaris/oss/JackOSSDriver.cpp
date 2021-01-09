@@ -245,6 +245,35 @@ void JackOSSDriver::DisplayDeviceInfo()
     }
 }
 
+int JackOSSDriver::WriteSilence(unsigned int size) {
+    if (size == 0 || fOutFD < 0) {
+        return -1;
+    }
+
+    memset(fOutputBuffer, 0, fOutputBufferSize);
+
+    // Prefill OSS playback buffer, write some periods of silence.
+    while (size > 0) {
+        ssize_t chunk = (size > fOutputBufferSize) ? fOutputBufferSize : size;
+        size -= chunk;
+        ssize_t count = ::write(fOutFD, fOutputBuffer, chunk);
+        if (count < chunk) {
+            jack_error("JackOSSDriver::WriteSilence error bytes written = %ld", count);
+            return -1;
+        }
+    }
+
+    int delay;
+    if (ioctl(fOutFD, SNDCTL_DSP_GETODELAY, &delay) == -1) {
+        jack_error("JackOSSDriver::WriteSilence error get out delay : %s@%i, errno = %d", __FILE__, __LINE__, errno);
+        return -1;
+    }
+
+    delay /= fSampleSize * fPlaybackChannels;
+    jack_info("JackOSSDriver::WriteSilence output latency frames = %ld", delay);
+    return 0;
+}
+
 int JackOSSDriver::OpenInput()
 {
     int flags = 0;
@@ -674,6 +703,17 @@ int JackOSSDriver::Read()
 
     ssize_t count;
 
+#ifdef __FreeBSD__
+    if (fFirstCycle && fOutFD > 0) {
+        fFirstCycle = false;
+        // Duplex mode, start playback right before recording with some silence.
+        // Consistently results in a total of (1 + nperiod) * period samples in flight.
+        if (WriteSilence((1 + fNperiods) * fOutputBufferSize) < 0) {
+            return -1;
+        }
+    }
+#endif
+
 #ifdef JACK_MONITOR
     gCycleTable.fTable[gCycleCount].fBeforeRead = GetMicroSeconds();
 #endif
@@ -738,27 +778,10 @@ int JackOSSDriver::Write()
 
     // Maybe necessary to write an empty output buffer first time : see http://manuals.opensound.com/developer/fulldup.c.html
     if (fFirstCycle) {
-
         fFirstCycle = false;
-        memset(fOutputBuffer, 0, fOutputBufferSize);
-
-        // Prefill output buffer
-        for (int i = 0; i < fNperiods; i++) {
-           count = ::write(fOutFD, fOutputBuffer, fOutputBufferSize);
-           if (count < (int)fOutputBufferSize) {
-                jack_error("JackOSSDriver::Write error bytes written = %ld", count);
-                return -1;
-            }
-        }
-
-        int delay;
-        if (ioctl(fOutFD, SNDCTL_DSP_GETODELAY, &delay) == -1) {
-            jack_error("JackOSSDriver::Write error get out delay : %s@%i, errno = %d", __FILE__, __LINE__, errno);
+        if (WriteSilence(fNperiods * fOutputBufferSize) < 0) {
             return -1;
         }
-
-        delay /= fSampleSize * fPlaybackChannels;
-        jack_info("JackOSSDriver::Write output latency frames = %ld", delay);
     }
 
 #ifdef JACK_MONITOR
