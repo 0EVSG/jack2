@@ -714,12 +714,50 @@ int JackOSSDriver::Read()
     }
 #endif
 
+#ifdef __FreeBSD__
+    jack_time_t cycle_start = GetMicroSeconds();
+    if (fOSSSyncTime == 0) {
+        fOSSSyncTime = cycle_start;
+    }
+#endif
+
 #ifdef JACK_MONITOR
     gCycleTable.fTable[gCycleCount].fBeforeRead = GetMicroSeconds();
 #endif
 
     audio_errinfo ei_in;
     count = ::read(fInFD, fInputBuffer, fInputBufferSize);
+
+#ifdef __FreeBSD__
+    if (count > 0) {
+        jack_time_t now = GetMicroSeconds();
+        long long passed = ((now - fOSSSyncTime) * fEngineControl->fSampleRate) / 1000000ULL;
+        if (passed > fOSSReadSamples + fOSSInBuffer) {
+            // Overrun, adjust read position.
+            long long missed = passed - (fOSSReadSamples + fOSSInBuffer);
+            jack_error("JackOSSDriver::Read missed %d samples by overrun", missed);
+            fOSSReadSamples += missed;
+            fOSSSyncSamples -= missed;
+        }
+        fOSSReadSamples += count / (fSampleSize * fCaptureChannels);
+        if (now - cycle_start > 100 && passed < fOSSReadSamples + fEngineControl->fBufferSize) {
+            // Early cycle start, blocking read() - should be in sync now.
+            oss_count_t ptr;
+            if (ioctl(fInFD, SNDCTL_DSP_CURRENT_IPTR, &ptr) == 0 && ptr.samples > 0) {
+                // Sync to OSS buffer counter, update relative read position.
+                fOSSReadSamples -= ptr.samples - fOSSSyncSamples;
+                fOSSSyncSamples = ptr.samples;
+                fOSSSyncTime = now;
+                // Adjust relative read position if buffer info is available.
+                if (ptr.fifo_samples > 0 && ptr.fifo_samples != -fOSSReadSamples) {
+                    jack_error("JackOSSDriver::Read sync adjust by %ld", ptr.fifo_samples + fOSSReadSamples);
+                    fOSSReadSamples = -ptr.fifo_samples;
+                }
+            }
+        }
+//        jack_info("JackOSSDriver::Read now %ld rs %ld ss %ld st %ld", now, fOSSReadSamples, fOSSSyncSamples, fOSSSyncTime);
+    }
+#endif
 
 #ifdef JACK_MONITOR
     if (count > 0 && count != (int)fInputBufferSize)
@@ -774,6 +812,7 @@ int JackOSSDriver::Write()
     }
 
     ssize_t count;
+    unsigned int skip = 0;
     audio_errinfo ei_out;
 
     // Maybe necessary to write an empty output buffer first time : see http://manuals.opensound.com/developer/fulldup.c.html
@@ -799,12 +838,40 @@ int JackOSSDriver::Write()
     gCycleTable.fTable[gCycleCount].fBeforeWrite = GetMicroSeconds();
   #endif
 
+#ifdef __FreeBSD__
+    if (fInFD > 0) {
+        jack_time_t now = GetMicroSeconds();
+        long long passed = ((now - fOSSSyncTime) * fEngineControl->fSampleRate) / 1000000ULL;
+        passed -= fOSSReadSamples;
+        if (passed > (fEngineControl->fBufferSize * fNperiods)) {
+            // Skip playback to avoid buffer accumulation through excessive input.
+            long long overdue = passed - (fEngineControl->fBufferSize * fNperiods);
+            oss_count_t ptr;
+            if (ioctl(fOutFD, SNDCTL_DSP_CURRENT_OPTR, &ptr) == 0) {
+                jack_error("JackOSSDriver::Write skip %ld samples, %d in buffer", overdue, ptr.fifo_samples);
+            } else {
+                jack_error("JackOSSDriver::Write skip %ld samples", overdue);
+            }
+            if (overdue > fEngineControl->fBufferSize) {
+                skip = fOutputBufferSize;
+            } else {
+                skip = overdue * fSampleSize * fPlaybackChannels;
+            }
+        }
+    }
+#endif
+
     // Keep end cycle time
     JackDriver::CycleTakeEndTime();
-    count = ::write(fOutFD, fOutputBuffer, fOutputBufferSize);
+    if (skip < fOutputBufferSize) {
+        count = ::write(fOutFD, ((char*)fOutputBuffer) + skip, fOutputBufferSize - skip);
+    } else {
+        skip = fOutputBufferSize;
+        count = 0;
+    }
 
   #ifdef JACK_MONITOR
-    if (count > 0 && count != (int)fOutputBufferSize)
+    if (count > 0 && count != (int)(fOutputBufferSize - skip))
         jack_log("JackOSSDriver::Write count = %ld", count / (fSampleSize * fPlaybackChannels));
     gCycleTable.fTable[gCycleCount].fAfterWrite = GetMicroSeconds();
     gCycleCount = (gCycleCount == CYCLE_POINTS - 1) ? gCycleCount: gCycleCount + 1;
@@ -827,7 +894,7 @@ int JackOSSDriver::Write()
     if (count < 0) {
         jack_log("JackOSSDriver::Write error = %s", strerror(errno));
         return -1;
-    } else if (count < (int)fOutputBufferSize) {
+    } else if (count < (int)(fOutputBufferSize - skip)) {
         jack_error("JackOSSDriver::Write error bytes written = %ld", count);
         return -1;
     } else {
