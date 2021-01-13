@@ -883,7 +883,7 @@ int JackOSSDriver::Read()
     if (ioctl(fInFD, SNDCTL_DSP_GETERROR, &ei_in) == 0) {
 
         if (ei_in.rec_overruns > 0 ) {
-            jack_error("JackOSSDriver::Read overruns");
+            jack_error("JackOSSDriver::Read overruns = %d", ei_in.rec_overruns);
             jack_time_t cur_time = GetMicroSeconds();
             NotifyXRun(cur_time, float(cur_time - fBeginDateUst));   // Better this value than nothing...
         }
@@ -1013,7 +1013,7 @@ int JackOSSDriver::Write()
     if (ioctl(fOutFD, SNDCTL_DSP_GETERROR, &ei_out) == 0) {
 
         if (ei_out.play_underruns > 0) {
-            jack_error("JackOSSDriver::Write underruns");
+            jack_error("JackOSSDriver::Write underruns = %d", ei_out.play_underruns);
             jack_time_t cur_time = GetMicroSeconds();
             NotifyXRun(cur_time, float(cur_time - fBeginDateUst));   // Better this value than nothing...
         }
