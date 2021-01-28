@@ -722,60 +722,53 @@ int JackOSSDriver::Read()
         fOSSSyncTime = GetMicroSeconds();
         fOSSBlockSize = 1;
         // In duplex mode, start playback right before recording with some silence.
-        // Consistently results in a total of (1 + nperiod) * period samples in flight.
+        // Consistently results in a total of (1 + nperiod) * period frames in flight.
         if (fOutFD > 0) {
             if (WriteSilence((1 + fNperiods) * fOutputBufferSize) < 0) {
                 return -1;
             }
         }
-        // Read one sample into a new hardware block so we can check its size.
-        jack_nframes_t guess = 1;
-        count = ::read(fInFD, fInputBuffer, guess * fSampleSize * fCaptureChannels);
+        // Read one frame into a new hardware block so we can check its size.
+        jack_nframes_t frames = 1;
+        count = ::read(fInFD, fInputBuffer, frames * fSampleSize * fCaptureChannels);
         // Sometimes the first hardware reads are short, try multiple times.
-        while (count > 0) {
-            fOSSReadSamples += count / (fSampleSize * fCaptureChannels);
-            count = 0;
-            if (fOSSReadSamples == 1 && fOSSSyncSamples < fOSSInBuffer) {
-                // Successfully read one sample into a new block.
-                oss_count_t ptr;
-                if (ioctl(fInFD, SNDCTL_DSP_CURRENT_IPTR, &ptr) == 0 && ptr.samples > 0) {
-                    long long block = ptr.samples - fOSSSyncSamples;
-                    if (block > 1 && block <= fEngineControl->fBufferSize) {
-                        // Sync to the new hardware block.
-                        fOSSSyncTime = GetMicroSeconds();
-                        fOSSReadSamples -= block;
-                        fOSSSyncSamples = ptr.samples;
-                        if (fOutFD > 0) {
-                            WriteSilence(block * fSampleSize * fPlaybackChannels);
-                        }
-                        if (block == guess) {
-                            // Got the same hardware block size twice - take it!
-                            fOSSBlockSize = block;
-                        } else {
-                            // Different from last hardware block size - try next block.
-                            guess = block;
-                            count = ::read(fInFD, fInputBuffer, guess * fSampleSize * fCaptureChannels);
-                        }
-                    }
-                }
-            }
-        }
-        if (fOSSReadSamples < 0) {
-            // Read the remaining part of the last hardware block for a clean start.
-            count = ::read(fInFD, fInputBuffer, (-fOSSReadSamples) * fSampleSize * fCaptureChannels);
-        } else if (fOSSReadSamples == 1) {
-            // Detection failed, just read a full period since last sync.
+        for (int probes = 4; probes >= 0 && count > 0; --probes) {
+            fOSSSyncOffset += count / (fSampleSize * fCaptureChannels);
             if (fOutFD > 0) {
-                WriteSilence(fOutputBufferSize);
+                WriteSilence(count);
             }
-            count = ::read(fInFD, fInputBuffer, fInputBufferSize - (fSampleSize * fCaptureChannels));
-        }
-        if (count > 0) {
-            fOSSReadSamples += count / (fSampleSize * fCaptureChannels);
             count = 0;
-        }
-        if (fOSSBlockSize > 1) {
-            jack_info("JackOSSDriver::Read guess hardware block size is %d", fOSSBlockSize);
+            if (fOSSSyncOffset == 1) {
+                // Successfully read one frame into a new block.
+                oss_count_t ptr;
+                if (ioctl(fInFD, SNDCTL_DSP_CURRENT_IPTR, &ptr) == 0 && ptr.fifo_samples > 0) {
+                    // Sync to the new hardware block.
+                    fOSSSyncTime = GetMicroSeconds();
+                    fOSSSyncOffset = -ptr.fifo_samples;
+                    jack_nframes_t block = 1U + ptr.fifo_samples;
+                    if (block == frames) {
+                        // Got the same hardware block size twice - take it!
+                        jack_info("JackOSSDriver::Read hardware block size is %d", block);
+                        fOSSBlockSize = block;
+                        // Read remaining part of the block for a clean start.
+                        frames = ptr.fifo_samples;
+                    } else if (block > fEngineControl->fBufferSize){
+                        // Hardware block size too big, just read a full period since last sync.
+                        jack_info("JackOSSDriver::Read hardware block size %d > period", block);
+                        frames = fEngineControl->fBufferSize - 1;
+                    } else if (probes > 1) {
+                        // Different from last hardware block size - try next block.
+                        frames = block;
+                    } else {
+                        // No more probes, read remaining part of the last hardware block.
+                        frames = ptr.fifo_samples;
+                    }
+                } else {
+                    // Detection failed, just read a full period since last sync.
+                    frames = fEngineControl->fBufferSize - 1;
+                }
+                count = ::read(fInFD, fInputBuffer, frames * fSampleSize * fCaptureChannels);
+            }
         }
     }
 #endif
@@ -788,30 +781,24 @@ int JackOSSDriver::Read()
         jack_time_t now = GetMicroSeconds();
         long long passed = us_to_samples(now - fOSSSyncTime, fEngineControl->fSampleRate);
         passed -= (passed % fOSSBlockSize);
-        if (passed > fOSSReadSamples + fOSSInBuffer) {
+        if (passed > fOSSSyncOffset + fOSSInBuffer) {
             // Overrun, adjust read position.
-            long long missed = passed - (fOSSReadSamples + fOSSInBuffer);
-            jack_error("JackOSSDriver::Read missed %d samples by overrun", missed);
-            fOSSReadSamples += missed;
-            fOSSSyncSamples -= missed;
+            long long missed = passed - (fOSSSyncOffset + fOSSInBuffer);
+            jack_error("JackOSSDriver::Read missed %d frames by overrun", missed);
+            fOSSSyncOffset += missed;
         }
-        fOSSReadSamples += count / (fSampleSize * fCaptureChannels);
-        if (now - cycle_start > 100 && passed < fOSSReadSamples + fOSSFragment) {
+        fOSSSyncOffset += count / (fSampleSize * fCaptureChannels);
+        if (now - cycle_start > 100 && passed < fOSSSyncOffset + fOSSFragment) {
             // Early cycle start, blocking read() - should be in sync now.
             oss_count_t ptr;
-            if (ioctl(fInFD, SNDCTL_DSP_CURRENT_IPTR, &ptr) == 0 && ptr.samples > 0) {
-                // Sync to OSS buffer counter, update relative read position.
-                fOSSReadSamples -= ptr.samples - fOSSSyncSamples;
-                fOSSSyncSamples = ptr.samples;
-                fOSSSyncTime = now;
-                // Adjust relative read position if buffer info is available.
-                if (ptr.fifo_samples > 0 && ptr.fifo_samples != -fOSSReadSamples) {
-                    jack_error("JackOSSDriver::Read sync adjust by %ld", ptr.fifo_samples + fOSSReadSamples);
-                    fOSSReadSamples = -ptr.fifo_samples;
-                }
-                // More than a hardware block of samples left means we were late for sync.
-                if (fOSSBlockSize > 1 && fOSSReadSamples + fOSSBlockSize < 0) {
-                    jack_error("JackOSSDriver::Read bad sync condition, overdue by %ld", -fOSSReadSamples);
+            if (ioctl(fInFD, SNDCTL_DSP_CURRENT_IPTR, &ptr) == 0 && ptr.fifo_samples >= 0) {
+                if (fOSSBlockSize > 1 && ptr.fifo_samples > (int)fOSSBlockSize) {
+                    // More than a hardware block of frames left means we were late for sync.
+                    jack_error("JackOSSDriver::Read bad sync condition, overdue by %d", ptr.fifo_samples);
+                } else {
+                    // Sync to OSS buffer counter, update relative read position.
+                    fOSSSyncTime = now;
+                    fOSSSyncOffset = -ptr.fifo_samples;
                 }
             }
         }
@@ -902,18 +889,14 @@ int JackOSSDriver::Write()
     if (fInFD > 0) {
         jack_time_t now = GetMicroSeconds();
         long long passed = us_to_samples(now - fOSSSyncTime, fEngineControl->fSampleRate);
+        long long original = passed;
         passed = ((passed / fOSSBlockSize) + 1) * fOSSBlockSize;
-        long long written = fOSSReadSamples + (fEngineControl->fBufferSize * fNperiods);
+        long long written = fOSSSyncOffset + (fEngineControl->fBufferSize * fNperiods);
         if (passed > written) {
             // Skip playback to avoid buffer accumulation through excessive input.
             long long overdue = passed - written;
-            oss_count_t ptr;
-            if (ioctl(fOutFD, SNDCTL_DSP_CURRENT_OPTR, &ptr) == 0) {
-                jack_error("JackOSSDriver::Write skip %ld samples, %d in buffer", overdue, ptr.fifo_samples);
-                jack_error("JackOSSDriver::Write now %ld rs %ld ss %ld st %ld", now, fOSSReadSamples, fOSSSyncSamples, fOSSSyncTime);
-            } else {
-                jack_error("JackOSSDriver::Write skip %ld samples", overdue);
-            }
+            jack_error("JackOSSDriver::Write late by %ld, skip %ld frames", original - written, overdue);
+            jack_error("JackOSSDriver::Write %ld frame offset from sync %ld us ago", fOSSSyncOffset, now - fOSSSyncTime);
             if (overdue > fEngineControl->fBufferSize) {
                 skip = fOutputBufferSize;
             } else {

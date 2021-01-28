@@ -72,8 +72,7 @@ class JackOSSDriver : public JackAudioDriver
         jack_nframes_t fOSSOutBuffer;
 
         jack_time_t fOSSSyncTime;
-        long long fOSSSyncSamples;
-        long long fOSSReadSamples;
+        long long fOSSSyncOffset;
 
         int OpenInput();
         int OpenOutput();
@@ -95,7 +94,7 @@ class JackOSSDriver : public JackAudioDriver
                 fInputBufferSize(0), fOutputBufferSize(0),
                 fInputBuffer(NULL), fOutputBuffer(NULL), fFirstCycle(true),
                 fOSSFragment(0), fOSSBlockSize(1), fOSSInBuffer(0), fOSSOutBuffer(0),
-                fOSSSyncTime(0), fOSSSyncSamples(0), fOSSReadSamples(0)
+                fOSSSyncTime(0), fOSSSyncOffset(0)
         {}
 
         virtual ~JackOSSDriver()
