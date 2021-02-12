@@ -886,6 +886,10 @@ int JackOSSDriver::Read()
         if (fOutFD > 0 && ioctl(fOutFD, SNDCTL_DSP_CURRENT_OPTR, &ptr) != -1) {
             jack_info("JackOSSDriver::Read playback samples = %ld, fifo_samples = %d", ptr.samples, ptr.fifo_samples);
         }
+        int delay = 0;
+        if (ioctl(fOutFD, SNDCTL_DSP_GETODELAY, &delay) == 0) {
+            jack_info("JackOSSDriver::Read playback latency = %ld", delay / (fSampleSize * fPlaybackChannels));
+        }
         jack_info("JackOSSDriver::Read total recorded samples = %ld", sample_count);
     }
 
