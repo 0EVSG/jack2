@@ -886,6 +886,13 @@ int JackOSSDriver::Read()
         if (fOutFD > 0 && ioctl(fOutFD, SNDCTL_DSP_CURRENT_OPTR, &ptr) != -1) {
             jack_info("JackOSSDriver::Read playback samples = %ld, fifo_samples = %d", ptr.samples, ptr.fifo_samples);
         }
+        count_info info;
+        if (ioctl(fInFD, SNDCTL_DSP_GETIPTR, &info) != -1) {
+            jack_info("JackOSSDriver::Read recording bytes = %d, blocks = %d, ptr = %d", info.bytes, info.blocks, info.ptr);
+        }
+        if (fOutFD > 0 && ioctl(fOutFD, SNDCTL_DSP_GETOPTR, &info) != -1) {
+            jack_info("JackOSSDriver::Read playback bytes = %d, blocks = %d, ptr = %d", info.bytes, info.blocks, info.ptr);
+        }
         int delay = 0;
         if (ioctl(fOutFD, SNDCTL_DSP_GETODELAY, &delay) == 0) {
             jack_info("JackOSSDriver::Read playback latency = %ld", delay / (fSampleSize * fPlaybackChannels));
