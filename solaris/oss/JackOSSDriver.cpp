@@ -383,6 +383,15 @@ int JackOSSDriver::OpenInput()
         }
         fOSSFragment = info.fragsize / (fSampleSize * fCaptureChannels);
     }
+
+    if (fOSSInBuffer > fEngineControl->fBufferSize) {
+        int mark = fInputBufferSize;
+        if (ioctl(fInFD, SNDCTL_DSP_LOW_WATER, &mark) != 0) {
+            jack_error("JackOSSDriver::OpenInput failed to set low water mark : %s@%i, errno = %d", __FILE__, __LINE__, errno);
+            goto error;
+        }
+        jack_info("JackOSSDriver::OpenInput set low water mark to %d", mark);
+    }
 #else
     fInputBufferSize = 0;
     if (ioctl(fInFD, SNDCTL_DSP_GETBLKSIZE, &fInputBufferSize) == -1) {
@@ -515,6 +524,16 @@ int JackOSSDriver::OpenOutput()
             fOSSOutBuffer = info.fragstotal * info.fragsize / (fSampleSize * fPlaybackChannels);
         }
         fOSSFragment = info.fragsize / (fSampleSize * fPlaybackChannels);
+    }
+
+    if (fOSSOutBuffer > fEngineControl->fBufferSize * fNperiods) {
+        jack_nframes_t low = fOSSOutBuffer - (fNperiods * fEngineControl->fBufferSize);
+        int mark = low * fSampleSize * fPlaybackChannels;
+        if (ioctl(fOutFD, SNDCTL_DSP_LOW_WATER, &mark) != 0) {
+            jack_error("JackOSSDriver::OpenOutput failed to set low water mark : %s@%i, errno = %d", __FILE__, __LINE__, errno);
+            goto error;
+        }
+        jack_info("JackOSSDriver::OpenOutput set low water mark to %d", mark);
     }
 #else
     fOutputBufferSize = 0;
