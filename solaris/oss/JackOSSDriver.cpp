@@ -285,6 +285,7 @@ int JackOSSDriver::OpenInput()
     int cur_capture_channels;
     int cur_sample_format;
     jack_nframes_t cur_sample_rate;
+    audio_buf_info info;
 
     if (fCaptureChannels == 0) fCaptureChannels = 2;
 
@@ -338,50 +339,36 @@ int JackOSSDriver::OpenInput()
     }
 
 #ifdef __FreeBSD__
+    // Internal buffer size required for one period.
     fInputBufferSize = fEngineControl->fBufferSize * fSampleSize * fCaptureChannels;
-    if (!fIgnoreHW) {
-        audio_buf_info info = {0, 0, 0, 0};
+
+    // Get the total size of the OSS recording buffer, in sample frames.
+    info = {0, 0, 0, 0};
+    if (ioctl(fInFD, SNDCTL_DSP_GETISPACE, &info) == -1 || info.fragsize <= 0 || info.fragstotal <= 0) {
+        jack_error("JackOSSDriver::OpenInput failed to get buffer info : %s@%i, errno = %d", __FILE__, __LINE__, errno);
+        goto error;
+    }
+    fOSSInBuffer = info.fragstotal * info.fragsize / (fSampleSize * fCaptureChannels);
+
+    if (fOSSInBuffer < fEngineControl->fBufferSize * (1 + fNperiods)) {
+        // Total size of the OSS recording buffer is too small, resize it.
+        unsigned int buf_size = fInputBufferSize * (1 + fNperiods);
+        // Keep current fragment size if possible - respect OSS latency settings.
+        gFragFormat = int2pow2(info.fragsize);
+        unsigned int frag_size = 1U << gFragFormat;
+        gFragFormat |= ((buf_size + frag_size - 1) / frag_size) << 16;
+        jack_info("JackOSSDriver::OpenInput request %d fragments of %d", (gFragFormat >> 16), frag_size);
+        if (ioctl(fInFD, SNDCTL_DSP_SETFRAGMENT, &gFragFormat) == -1) {
+            jack_error("JackOSSDriver::OpenInput failed to set fragments : %s@%i, errno = %d", __FILE__, __LINE__, errno);
+            goto error;
+        }
+        // Check the new OSS recording buffer size.
+        info = {0, 0, 0, 0};
         if (ioctl(fInFD, SNDCTL_DSP_GETISPACE, &info) == -1 || info.fragsize <= 0 || info.fragstotal <= 0) {
             jack_error("JackOSSDriver::OpenInput failed to get buffer info : %s@%i, errno = %d", __FILE__, __LINE__, errno);
             goto error;
         }
         fOSSInBuffer = info.fragstotal * info.fragsize / (fSampleSize * fCaptureChannels);
-
-        unsigned int frag_size = info.fragsize;
-        if (fOSSFragment < fEngineControl->fBufferSize) {
-            // Harmonize record and playback fragment size.
-            frag_size = fOSSFragment * fSampleSize * fCaptureChannels;
-            jack_info("JackOSSDriver::OpenInput harmonize fragments to %d", frag_size);
-        } else if (frag_size > fInputBufferSize) {
-            // Smaller fragment size needed, try to match period exactly.
-            frag_size = (1U << int2pow2(fInputBufferSize));
-            frag_size -= frag_size % (fSampleSize * fCaptureChannels);
-            jack_info("JackOSSDriver::OpenInput downsize fragments to %d", frag_size);
-        }
-        if ((fInputBufferSize % frag_size != 0) && (frag_size * 3U > fInputBufferSize)) {
-            // Fragment size may induce irregular timing, request a smaller one.
-            frag_size = fInputBufferSize / 6U;
-            jack_info("JackOSSDriver::OpenInput divide fragments into %d", frag_size);
-        }
-
-        if ((fOSSInBuffer < fEngineControl->fBufferSize * (1 + fNperiods)) || (int)frag_size != info.fragsize) {
-            // Total recording buffer size too small, or inappropriate fragment size.
-            gFragFormat = int2pow2(frag_size);
-            frag_size = (1U << gFragFormat);
-            frag_size -= frag_size % (fSampleSize * fCaptureChannels);
-            gFragFormat |= ((fInputBufferSize * (1 + fNperiods) + frag_size - 1) / frag_size) << 16;
-            jack_info("JackOSSDriver::OpenInput request %d fragments of %d", (gFragFormat >> 16), frag_size);
-            if (ioctl(fInFD, SNDCTL_DSP_SETFRAGMENT, &gFragFormat) == -1) {
-                jack_error("JackOSSDriver::OpenInput failed to set fragments : %s@%i, errno = %d", __FILE__, __LINE__, errno);
-                goto error;
-            }
-            if (ioctl(fInFD, SNDCTL_DSP_GETISPACE, &info) == -1 || info.fragsize <= 0 || info.fragstotal <= 0) {
-                jack_error("JackOSSDriver::OpenInput failed to get buffer info : %s@%i, errno = %d", __FILE__, __LINE__, errno);
-                goto error;
-            }
-            fOSSInBuffer = info.fragstotal * info.fragsize / (fSampleSize * fCaptureChannels);
-        }
-        fOSSFragment = info.fragsize / (fSampleSize * fCaptureChannels);
     }
 
     if (fOSSInBuffer > fEngineControl->fBufferSize) {
@@ -427,6 +414,7 @@ int JackOSSDriver::OpenOutput()
     int cur_sample_format;
     int cur_playback_channels;
     jack_nframes_t cur_sample_rate;
+    audio_buf_info info;
 
     if (fPlaybackChannels == 0) fPlaybackChannels = 2;
 
@@ -480,50 +468,37 @@ int JackOSSDriver::OpenOutput()
     }
 
 #ifdef __FreeBSD__
+    // Internal buffer size required for one period.
     fOutputBufferSize = fEngineControl->fBufferSize * fSampleSize * fPlaybackChannels;
-    if (!fIgnoreHW) {
-        audio_buf_info info = {0, 0, 0, 0};
+
+    // Get the total size of the OSS playback buffer, in sample frames.
+    info = {0, 0, 0, 0};
+    if (ioctl(fOutFD, SNDCTL_DSP_GETOSPACE, &info) == -1 || info.fragsize <= 0 || info.fragstotal <= 0) {
+        jack_error("JackOSSDriver::OpenOutput failed to get buffer info : %s@%i, errno = %d", __FILE__, __LINE__, errno);
+        goto error;
+    }
+    fOSSOutBuffer = info.fragstotal * info.fragsize / (fSampleSize * fPlaybackChannels);
+
+    if (fOSSOutBuffer < fEngineControl->fBufferSize * (1 + fNperiods)) {
+        // Total size of the OSS playback buffer is too small, resize it.
+        unsigned int buf_size = fOutputBufferSize * (1 + fNperiods);
+        // Keep current fragment size if possible - respect OSS latency settings.
+        // Some sound cards like Intel HDA may stutter when changing the fragment size.
+        gFragFormat = int2pow2(info.fragsize);
+        unsigned int frag_size = 1U << gFragFormat;
+        gFragFormat |= ((buf_size + frag_size - 1) / frag_size) << 16;
+        jack_info("JackOSSDriver::OpenOutput request %d fragments of %d", (gFragFormat >> 16), frag_size);
+        if (ioctl(fOutFD, SNDCTL_DSP_SETFRAGMENT, &gFragFormat) == -1) {
+            jack_error("JackOSSDriver::OpenOutput failed to set fragments : %s@%i, errno = %d", __FILE__, __LINE__, errno);
+            goto error;
+        }
+        // Check the new OSS playback buffer size.
+        info = {0, 0, 0, 0};
         if (ioctl(fOutFD, SNDCTL_DSP_GETOSPACE, &info) == -1 || info.fragsize <= 0 || info.fragstotal <= 0) {
             jack_error("JackOSSDriver::OpenOutput failed to get buffer info : %s@%i, errno = %d", __FILE__, __LINE__, errno);
             goto error;
         }
         fOSSOutBuffer = info.fragstotal * info.fragsize / (fSampleSize * fPlaybackChannels);
-
-        unsigned int frag_size = info.fragsize;
-        if (fOSSFragment < fEngineControl->fBufferSize) {
-            // Harmonize record and playback fragment size.
-            frag_size = fOSSFragment * fSampleSize * fPlaybackChannels;
-            jack_info("JackOSSDriver::OpenOutput harmonize fragments to %d", frag_size);
-        } else if (frag_size > fOutputBufferSize) {
-            // Smaller fragment size needed, try to match period exactly.
-            frag_size = (1U << int2pow2(fOutputBufferSize));
-            frag_size -= frag_size % (fSampleSize * fPlaybackChannels);
-            jack_info("JackOSSDriver::OpenOutput downsize fragments to %d", frag_size);
-        }
-        if ((fOutputBufferSize % frag_size != 0) && (frag_size * 3U > fOutputBufferSize)) {
-            // Fragment size may induce irregular timing, request a smaller one.
-            frag_size = fOutputBufferSize / 6U;
-            jack_info("JackOSSDriver::OpenOutput divide fragments into %d", frag_size);
-        }
-
-        if ((fOSSOutBuffer < fEngineControl->fBufferSize * (1 + fNperiods)) || (int)frag_size != info.fragsize) {
-            // Total playback buffer size too small, or inappropriate fragment size.
-            gFragFormat = int2pow2(frag_size);
-            frag_size = (1U << gFragFormat);
-            frag_size -= frag_size % (fSampleSize * fPlaybackChannels);
-            gFragFormat |= ((fOutputBufferSize * (1 + fNperiods) + frag_size - 1) / frag_size) << 16;
-            jack_info("JackOSSDriver::OpenOutput request %d fragments of %d", (gFragFormat >> 16), frag_size);
-            if (ioctl(fOutFD, SNDCTL_DSP_SETFRAGMENT, &gFragFormat) == -1) {
-                jack_error("JackOSSDriver::OpenOutput failed to set fragments : %s@%i, errno = %d", __FILE__, __LINE__, errno);
-                goto error;
-            }
-            if (ioctl(fOutFD, SNDCTL_DSP_GETOSPACE, &info) == -1 || info.fragsize <= 0 || info.fragstotal <= 0) {
-                jack_error("JackOSSDriver::OpenOutput failed to get buffer info : %s@%i, errno = %d", __FILE__, __LINE__, errno);
-                goto error;
-            }
-            fOSSOutBuffer = info.fragstotal * info.fragsize / (fSampleSize * fPlaybackChannels);
-        }
-        fOSSFragment = info.fragsize / (fSampleSize * fPlaybackChannels);
     }
 
     if (fOSSOutBuffer > fEngineControl->fBufferSize * fNperiods) {
@@ -597,7 +572,6 @@ int JackOSSDriver::Open(jack_nframes_t nframes,
         fIgnoreHW = ignorehwbuf;
         fNperiods = user_nperiods;
         fExcl = excl;
-        fOSSFragment = fEngineControl->fBufferSize;
 
     #ifdef JACK_MONITOR
         // Force memory page in
