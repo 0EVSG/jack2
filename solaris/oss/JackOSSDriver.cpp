@@ -555,6 +555,9 @@ int JackOSSDriver::Open(jack_nframes_t nframes,
                       int bits,
                       bool ignorehwbuf)
 {
+    // Additional playback latency as requested by the user.
+    // This way the remaining latency should be symmetric as reported by jack_iodelay.
+    playback_latency += user_nperiods * nframes;
     // Generic JackAudioDriver Open
     if (JackAudioDriver::Open(nframes, samplerate, capturing, playing, inchannels, outchannels, monitor,
         capture_driver_uid, playback_driver_uid, capture_latency, playback_latency) != 0) {
