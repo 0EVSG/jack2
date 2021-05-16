@@ -42,9 +42,6 @@ typedef jack_default_audio_sample_t jack_sample_t;
 
 class JackOSSDriver : public JackAudioDriver
 {
-
-    enum { kRead = 1, kWrite = 2, kReadWrite = 3 };
-
     private:
 
         int fInFD;
@@ -54,7 +51,8 @@ class JackOSSDriver : public JackAudioDriver
         int fSampleFormat;
         int fNperiods;
         unsigned int fSampleSize;
-        int fRWMode;
+        bool fCapture;
+        bool fPlayback;
         bool fExcl;
         bool fIgnoreHW;
 
@@ -92,7 +90,7 @@ class JackOSSDriver : public JackAudioDriver
         JackOSSDriver(const char* name, const char* alias, JackLockedEngine* engine, JackSynchro* table)
                 : JackAudioDriver(name, alias, engine, table),
                 fInFD(-1), fOutFD(-1), fBits(0),
-                fSampleFormat(0), fNperiods(0), fRWMode(0), fExcl(false), fIgnoreHW(true),
+                fSampleFormat(0), fNperiods(0), fCapture(false), fPlayback(false), fExcl(false), fIgnoreHW(true),
                 fInputBufferSize(0), fOutputBufferSize(0),
                 fInputBuffer(NULL), fOutputBuffer(NULL), fFirstCycle(true),
                 fOSSBlockSize(1), fOSSMaxBlock(0), fOSSInBuffer(0), fOSSOutBuffer(0),

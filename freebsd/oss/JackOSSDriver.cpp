@@ -150,9 +150,9 @@ void JackOSSDriver::DisplayDeviceInfo()
 
     // Duplex cards : http://manuals.opensound.com/developer/full_duplex.html
     jack_info("Audio Interface Description :");
-    jack_info("Sampling Frequency : %d, Sample Format : %d, Mode : %d", fEngineControl->fSampleRate, fSampleFormat, fRWMode);
+    jack_info("Sampling Frequency : %d, Sample Format : %d", fEngineControl->fSampleRate, fSampleFormat);
 
-    if (fRWMode & kWrite) {
+    if (fPlayback) {
 
         oss_sysinfo si;
         if (ioctl(fOutFD, OSS_SYSINFO, &si) == -1) {
@@ -190,7 +190,7 @@ void JackOSSDriver::DisplayDeviceInfo()
         }
     }
 
-    if (fRWMode & kRead) {
+    if (fCapture) {
 
       	oss_sysinfo si;
         if (ioctl(fInFD, OSS_SYSINFO, &si) == -1) {
@@ -499,8 +499,8 @@ int JackOSSDriver::Open(jack_nframes_t nframes,
             return -1;
         }
 
-        fRWMode |= ((capturing) ? kRead : 0);
-        fRWMode |= ((playing) ? kWrite : 0);
+        fCapture = capturing;
+        fPlayback = playing;
         fBits = bits;
         fIgnoreHW = ignorehwbuf;
         fNperiods = user_nperiods;
@@ -579,24 +579,13 @@ int JackOSSDriver::OpenAux()
 {
     SetSampleFormat();
 
-    if ((fRWMode & kRead) && (OpenInput() < 0)) {
+    if (fCapture && (OpenInput() < 0)) {
         return -1;
     }
 
-    if ((fRWMode & kWrite) && (OpenOutput() < 0)) {
+    if (fPlayback && (OpenOutput() < 0)) {
         return -1;
     }
-
-    // In duplex mode, check that input and output use the same buffer size
-    /*
-
-    10/02/09 : deactivated for now, needs more check (only needed when *same* device is used for input and output ??)
-
-    if ((fRWMode & kRead) && (fRWMode & kWrite) && (fInputBufferSize != fOutputBufferSize)) {
-       jack_error("JackOSSDriver::OpenAux input and output buffer size are not the same!!");
-       return -1;
-    }
-    */
 
     DisplayDeviceInfo();
     return 0;
@@ -604,12 +593,12 @@ int JackOSSDriver::OpenAux()
 
 void JackOSSDriver::CloseAux()
 {
-    if (fRWMode & kRead && fInFD > 0) {
+    if (fCapture && fInFD > 0) {
         close(fInFD);
         fInFD = -1;
     }
 
-    if (fRWMode & kWrite && fOutFD > 0) {
+    if (fPlayback && fOutFD > 0) {
         close(fOutFD);
         fOutFD = -1;
     }
