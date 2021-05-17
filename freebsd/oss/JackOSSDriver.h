@@ -82,9 +82,6 @@ class JackOSSDriver : public JackAudioDriver
         void DisplayDeviceInfo();
         int WriteSilence(unsigned int size);
 
-        // Redefining since timing for CPU load is specific
-        int ProcessSync();
-
     public:
 
         JackOSSDriver(const char* name, const char* alias, JackLockedEngine* engine, JackSynchro* table)
