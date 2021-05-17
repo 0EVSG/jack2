@@ -863,8 +863,6 @@ int JackOSSDriver::Read()
 int JackOSSDriver::Write()
 {
     if (fOutFD < 0) {
-        // Keep end cycle time
-        JackDriver::CycleTakeEndTime();
         return 0;
     }
 
@@ -934,8 +932,6 @@ int JackOSSDriver::Write()
     }
     fOSSWriteOffset += fEngineControl->fBufferSize;
 
-    // Keep end cycle time
-    JackDriver::CycleTakeEndTime();
     if (skip < fOutputBufferSize) {
         count = ::write(fOutFD, ((char*)fOutputBuffer) + skip, fOutputBufferSize - skip);
     } else {
@@ -989,29 +985,6 @@ int JackOSSDriver::SetBufferSize(jack_nframes_t buffer_size)
     CloseAux();
     JackAudioDriver::SetBufferSize(buffer_size); // Generic change, never fails
     return OpenAux();
-}
-
-int JackOSSDriver::ProcessSync()
-{
-    // Read input buffers for the current cycle
-    if (Read() < 0) {
-        jack_error("ProcessSync: read error, skip cycle");
-        return 0;   // Non fatal error here, skip cycle, but continue processing...
-    }
-
-    if (fIsMaster) {
-        ProcessGraphSync();
-    } else {
-        ResumeRefNum();
-    }
-
-    // Write output buffers for the current cycle
-    if (Write() < 0) {
-        jack_error("JackAudioDriver::ProcessSync: write error, skip cycle");
-        return 0;   // Non fatal error here, skip cycle, but continue processing...
-    }
-
-    return 0;
 }
 
 } // end of namespace
