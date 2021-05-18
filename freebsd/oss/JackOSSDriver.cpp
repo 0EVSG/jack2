@@ -233,6 +233,66 @@ void JackOSSDriver::DisplayDeviceInfo()
     }
 }
 
+int JackOSSDriver::ProbeHardwareBlockSize()
+{
+    if (fInFD > 0) {
+        // Read one frame into a new hardware block so we can check its size.
+        // Repeat that for multiple probes, sometimes the first reads differ.
+        ssize_t bytes = 1 * fSampleSize * fCaptureChannels;
+        jack_nframes_t probes[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+        for (int p = 0; p < 8 && bytes > 0; ++p) {
+            ssize_t count = ::read(fInFD, fInputBuffer, bytes);
+            if (count < 0) {
+                // Read error - try again.
+                continue;
+            }
+            bytes -= count;
+            if (bytes == 0) {
+                // Successfully read one frame into a new hardware block.
+                oss_count_t ptr;
+                if (ioctl(fInFD, SNDCTL_DSP_CURRENT_IPTR, &ptr) == 0 && ptr.fifo_samples > 0) {
+                    probes[p] = 1U + ptr.fifo_samples;
+                    if (probes[p] <= fEngineControl->fBufferSize) {
+                        // Proceed by reading one frame into the next hardware block.
+                        bytes = probes[p] * fSampleSize * fCaptureChannels;
+                    } else {
+                        // Hardware block size is more than a period, irregular cycle timing.
+                        //! \todo Issue a warning here instead of info.
+                        jack_info("JackOSSDriver::Read hardware block size %d > period", probes[p]);
+                    }
+                }
+            }
+        }
+
+        // Examine probes of hardware block size.
+        fOSSMaxBlock = 1;
+        for (int p = 0; p < 8; ++p) {
+            jack_info("JackOSSDriver::Read hardware block of %d", probes[p]);
+            if (probes[p] > fOSSMaxBlock) {
+                fOSSMaxBlock = probes[p];
+            }
+        }
+
+        // Assume regular hardware block size if the last four probes are the same.
+        fOSSBlockSize = 1;
+        if (probes[7] > 0) {
+            if (probes[4] == probes[5] && probes[5] == probes[6] && probes[6] == probes[7]) {
+                fOSSBlockSize = probes[7];
+            }
+        }
+
+        // Stop recording to reset the recording buffer.
+        int trigger = 0;
+        ioctl(fInFD, SNDCTL_DSP_SETTRIGGER, &trigger);
+        return 0;
+    }
+
+    // Default values in case of an error.
+    fOSSMaxBlock = fEngineControl->fBufferSize;
+    fOSSBlockSize = 1;
+    return -1;
+}
+
 int JackOSSDriver::WriteSilence(unsigned int size) {
     if (size == 0 || fOutFD < 0) {
         return -1;
@@ -625,52 +685,10 @@ int JackOSSDriver::Read()
     if (fFirstCycle) {
         fFirstCycle = false;
 
-        // Read one frame into a new hardware block so we can check its size.
-        ssize_t bytes = 1 * fSampleSize * fCaptureChannels;
-        // Sometimes the first hardware reads are short, try multiple times.
-        jack_nframes_t probes[8] = {0, 0, 0, 0, 0, 0, 0, 0};
-        for (int p = 0; p < 8 && bytes > 0; ++p) {
-            count = ::read(fInFD, fInputBuffer, bytes);
-            if (count < 0) {
-                // Read error - try again.
-                continue;
-            }
-            bytes -= count;
-            if (bytes == 0) {
-                // Successfully read one frame into a new hardware block.
-                oss_count_t ptr;
-                if (ioctl(fInFD, SNDCTL_DSP_CURRENT_IPTR, &ptr) == 0 && ptr.fifo_samples > 0) {
-                    probes[p] = 1U + ptr.fifo_samples;
-                    if (probes[p] <= fEngineControl->fBufferSize) {
-                        // Proceed by reading one frame into the next hardware block.
-                        bytes = probes[p] * fSampleSize * fCaptureChannels;
-                    } else {
-                        // Hardware block size is more than a period, irregular cycle timing.
-                        //! \todo Issue a warning here instead of info.
-                        jack_info("JackOSSDriver::Read hardware block size %d > period", probes[p]);
-                    }
-                }
-            }
-        }
-        // Examine probes of hardware block size.
-        for (int p = 0; p < 8; ++p) {
-            jack_info("JackOSSDriver::Read hardware block of %d", probes[p]);
-            if (probes[p] > fOSSMaxBlock) {
-                fOSSMaxBlock = probes[p];
-            }
-        }
-        // Assume regular hardware block size if the last four probes are the same.
-        if (probes[7] > 0) {
-            if (probes[4] == probes[5] && probes[5] == probes[6] && probes[6] == probes[7]) {
-                fOSSBlockSize = probes[7];
-            }
-        }
+        ProbeHardwareBlockSize();
 
-        // Stop recording to reset the recording buffer.
-        int trigger = 0;
-        ioctl(fInFD, SNDCTL_DSP_SETTRIGGER, &trigger);
         // Start recording again for the following read.
-        trigger = PCM_ENABLE_INPUT;
+        int trigger = PCM_ENABLE_INPUT;
         ioctl(fInFD, SNDCTL_DSP_SETTRIGGER, &trigger);
         fOSSReadSync = GetMicroSeconds();
         fOSSReadOffset = 0;

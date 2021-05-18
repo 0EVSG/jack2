@@ -80,6 +80,7 @@ class JackOSSDriver : public JackAudioDriver
         void CloseAux();
         void SetSampleFormat();
         void DisplayDeviceInfo();
+        int ProbeHardwareBlockSize();
         int WriteSilence(unsigned int size);
 
     public:
