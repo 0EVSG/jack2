@@ -233,7 +233,7 @@ void JackOSSDriver::DisplayDeviceInfo()
     }
 }
 
-int JackOSSDriver::ProbeHardwareBlockSize()
+int JackOSSDriver::ProbeInBlockSize()
 {
     if (fInFD > 0) {
         // Read one frame into a new hardware block so we can check its size.
@@ -274,10 +274,10 @@ int JackOSSDriver::ProbeHardwareBlockSize()
         }
 
         // Assume regular hardware block size if the last four probes are the same.
-        fOSSBlockSize = 1;
+        fInBlockSize = 1;
         if (probes[7] > 0) {
             if (probes[4] == probes[5] && probes[5] == probes[6] && probes[6] == probes[7]) {
-                fOSSBlockSize = probes[7];
+                fInBlockSize = probes[7];
             }
         }
 
@@ -289,8 +289,15 @@ int JackOSSDriver::ProbeHardwareBlockSize()
 
     // Default values in case of an error.
     fOSSMaxBlock = fEngineControl->fBufferSize;
-    fOSSBlockSize = 1;
+    fInBlockSize = 1;
     return -1;
+}
+
+int JackOSSDriver::ProbeOutBlockSize()
+{
+    // Just use capture block size for now.
+    fOutBlockSize = fInBlockSize;
+    return 0;
 }
 
 int JackOSSDriver::WriteSilence(unsigned int size) {
@@ -417,6 +424,11 @@ int JackOSSDriver::OpenInput()
 
     fInputBuffer = (void*)calloc(fInputBufferSize, 1);
     assert(fInputBuffer);
+
+    if (ProbeInBlockSize() < 0) {
+      goto error;
+    }
+
     return 0;
 
 error:
@@ -522,6 +534,11 @@ int JackOSSDriver::OpenOutput()
     fOutputBuffer = (void*)calloc(fOutputBufferSize, 1);
     fFirstCycle = true;
     assert(fOutputBuffer);
+
+    if (ProbeOutBlockSize() < 0) {
+      goto error;
+    }
+
     return 0;
 
 error:
@@ -685,8 +702,6 @@ int JackOSSDriver::Read()
     if (fFirstCycle) {
         fFirstCycle = false;
 
-        ProbeHardwareBlockSize();
-
         // Start recording again for the following read.
         int trigger = PCM_ENABLE_INPUT;
         ioctl(fInFD, SNDCTL_DSP_SETTRIGGER, &trigger);
@@ -748,7 +763,7 @@ int JackOSSDriver::Read()
                     if (now - poll_start > 100) {
                         long long mark = fNperiods * fEngineControl->fBufferSize;
                         // Relax sync criteria for non-regular hardware block sizes.
-                        long long slack = (fOSSBlockSize > 1) ? fOSSMaxBlock : mark;
+                        long long slack = (fOutBlockSize > 1) ? fOSSMaxBlock : mark;
                         if (ptr.fifo_samples <= mark && ptr.fifo_samples > mark - slack) {
                             fOSSWriteSync = now;
                             fOSSWriteOffset = ptr.fifo_samples;
@@ -757,10 +772,10 @@ int JackOSSDriver::Read()
                     if (fOSSWriteSync != now) {
                         // Correct possible write offset mismatch after skipping playback data.
                         long long passed = us_to_samples(now - fOSSWriteSync, fEngineControl->fSampleRate);
-                        long long slack = (fOSSBlockSize > 1) ? 0 : fOSSMaxBlock;
+                        long long slack = (fOutBlockSize > 1) ? 0 : fOSSMaxBlock;
                         // Be conservative, round to nearest block instead of rounding down.
-                        passed += fOSSBlockSize / 2;
-                        passed -= (passed % fOSSBlockSize);
+                        passed += fOutBlockSize / 2;
+                        passed -= (passed % fOutBlockSize);
                         long long expected = fOSSWriteOffset - passed;
                         if (ptr.fifo_samples < expected - slack) {
                             // Correct write offset, possibly results in a sync adjustment.
@@ -768,7 +783,7 @@ int JackOSSDriver::Read()
                             fOSSWriteOffset -= ((expected - slack) - ptr.fifo_samples);
                         }
                         // Do the same, but for too many samples in queue.
-                        expected += fOSSBlockSize;
+                        expected += fOutBlockSize;
                         if (ptr.fifo_samples > expected + slack && ptr.fifo_samples > 0) {
                             // Correct write offset, possibly results in a sync adjustment.
                             jack_info("JackOSSDriver::Read high playback buffer of %d, expected %ld", ptr.fifo_samples, expected);
@@ -793,7 +808,7 @@ int JackOSSDriver::Read()
     if (count > 0) {
         jack_time_t now = GetMicroSeconds();
         long long passed = us_to_samples(now - fOSSReadSync, fEngineControl->fSampleRate);
-        passed -= (passed % fOSSBlockSize);
+        passed -= (passed % fInBlockSize);
         if (passed > fOSSReadOffset + fOSSInBuffer) {
             // Overrun, adjust read and write position.
             long long missed = passed - (fOSSReadOffset + fOSSInBuffer);
@@ -938,8 +953,8 @@ int JackOSSDriver::Write()
             }
         }
         long long passed = us_to_samples(now - fOSSWriteSync, fEngineControl->fSampleRate);
-        long long consumed = passed - (passed % fOSSBlockSize);
-        long long tolerance = (fOSSBlockSize > 1) ? 0 : fOSSMaxBlock;
+        long long consumed = passed - (passed % fOutBlockSize);
+        long long tolerance = (fOutBlockSize > 1) ? 0 : fOSSMaxBlock;
         if (consumed > fOSSWriteOffset + tolerance) {
             // Skip playback to avoid buffer accumulation through excessive input.
             long long overdue = consumed - fOSSWriteOffset - tolerance;
