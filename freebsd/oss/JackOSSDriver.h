@@ -64,7 +64,8 @@ class JackOSSDriver : public JackAudioDriver
 
         bool fFirstCycle;
 
-        jack_nframes_t fOSSBlockSize;
+        jack_nframes_t fInBlockSize;
+        jack_nframes_t fOutBlockSize;
         jack_nframes_t fOSSMaxBlock;
         jack_nframes_t fOSSInBuffer;
         jack_nframes_t fOSSOutBuffer;
@@ -80,7 +81,8 @@ class JackOSSDriver : public JackAudioDriver
         void CloseAux();
         void SetSampleFormat();
         void DisplayDeviceInfo();
-        int ProbeHardwareBlockSize();
+        int ProbeInBlockSize();
+        int ProbeOutBlockSize();
         int WriteSilence(unsigned int size);
 
     public:
@@ -91,7 +93,7 @@ class JackOSSDriver : public JackAudioDriver
                 fSampleFormat(0), fNperiods(0), fCapture(false), fPlayback(false), fExcl(false), fIgnoreHW(true),
                 fInputBufferSize(0), fOutputBufferSize(0),
                 fInputBuffer(NULL), fOutputBuffer(NULL), fFirstCycle(true),
-                fOSSBlockSize(1), fOSSMaxBlock(0), fOSSInBuffer(0), fOSSOutBuffer(0),
+                fInBlockSize(1), fOutBlockSize(1), fOSSMaxBlock(0), fOSSInBuffer(0), fOSSOutBuffer(0),
                 fOSSReadSync(0), fOSSReadOffset(0), fOSSWriteSync(0), fOSSWriteOffset(0)
         {}
 
