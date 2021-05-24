@@ -300,14 +300,15 @@ int JackOSSDriver::ProbeOutBlockSize()
     return 0;
 }
 
-int JackOSSDriver::WriteSilence(unsigned int size) {
-    if (size == 0 || fOutFD < 0) {
+int JackOSSDriver::WriteSilence(jack_nframes_t frames)
+{
+    if (fOutFD < 0) {
         return -1;
     }
 
-    memset(fOutputBuffer, 0, fOutputBufferSize);
-
     // Prefill OSS playback buffer, write some periods of silence.
+    memset(fOutputBuffer, 0, fOutputBufferSize);
+    unsigned int size = frames * fSampleSize * fPlaybackChannels;
     while (size > 0) {
         ssize_t chunk = (size > fOutputBufferSize) ? fOutputBufferSize : size;
         size -= chunk;
@@ -317,15 +318,6 @@ int JackOSSDriver::WriteSilence(unsigned int size) {
             return -1;
         }
     }
-
-    int delay;
-    if (ioctl(fOutFD, SNDCTL_DSP_GETODELAY, &delay) == -1) {
-        jack_error("JackOSSDriver::WriteSilence error get out delay : %s@%i, errno = %d", __FILE__, __LINE__, errno);
-        return -1;
-    }
-
-    delay /= fSampleSize * fPlaybackChannels;
-    jack_info("JackOSSDriver::WriteSilence output latency frames = %ld", delay);
     return 0;
 }
 
@@ -795,7 +787,7 @@ int JackOSSDriver::Read()
     if (fOutFD > 0 && fOSSWriteSync == 0) {
         // First cycle, match read sync time and write silence for initial latency.
         fOSSWriteSync = fOSSReadSync;
-        WriteSilence(fNperiods * fOutputBufferSize);
+        WriteSilence(fNperiods * fEngineControl->fBufferSize);
         fOSSWriteOffset = fNperiods * fEngineControl->fBufferSize;
     }
 
@@ -937,7 +929,7 @@ int JackOSSDriver::Write()
                 jack_info("JackOSSDriver::Write recording offset %ld sync %ld ago", fOSSReadOffset, now - fOSSReadSync);
                 jack_info("JackOSSDriver::Write playback offset %ld sync %ld ago", fOSSWriteOffset, now - fOSSWriteSync);
                 jack_info("JackOSSDriver::Write fill up %ld", write_off - read_off);
-                WriteSilence((write_off - read_off) * fSampleSize * fPlaybackChannels);
+                WriteSilence(write_off - read_off);
                 fOSSWriteOffset += (write_off - read_off);
             }
             if (read_off >= write_off + fOSSMaxBlock) {

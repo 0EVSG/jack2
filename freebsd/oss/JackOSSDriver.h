@@ -81,7 +81,7 @@ class JackOSSDriver : public JackAudioDriver
         void DisplayDeviceInfo();
         int ProbeInBlockSize();
         int ProbeOutBlockSize();
-        int WriteSilence(unsigned int size);
+        int WriteSilence(jack_nframes_t frames);
         int WaitAndSync();
 
     public:
