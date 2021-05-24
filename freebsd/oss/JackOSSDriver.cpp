@@ -329,6 +329,85 @@ int JackOSSDriver::WriteSilence(unsigned int size) {
     return 0;
 }
 
+int JackOSSDriver::WaitAndSync()
+{
+    jack_time_t poll_start = GetMicroSeconds();
+    // Poll until recording and playback buffer are ready for this cycle.
+    pollfd poll_fd[2];
+    poll_fd[0].fd = fInFD;
+    if (fInFD > 0) {
+        poll_fd[0].events = POLLIN;
+    } else {
+        poll_fd[0].events = 0;
+    }
+    poll_fd[1].fd = fOutFD;
+    if (fOutFD > 0 && fOSSWriteSync != 0) {
+        poll_fd[1].events = POLLOUT;
+    } else {
+        poll_fd[1].events = 0;
+    }
+    while (poll_fd[0].events != 0 || poll_fd[1].events != 0) {
+        poll_fd[0].revents = 0;
+        poll_fd[1].revents = 0;
+        int ret = poll(poll_fd, 2, 500);
+        jack_time_t now = GetMicroSeconds();
+        if (ret <= 0) {
+            jack_error("JackOSSDriver::Read poll failed with %d after %ld us", ret, now - poll_start);
+            return ret;
+        }
+        if (poll_fd[0].revents & POLLIN) {
+            // Check the excess recording frames.
+            oss_count_t ptr;
+            if (now - poll_start > 100 && ioctl(fInFD, SNDCTL_DSP_CURRENT_IPTR, &ptr) != -1) {
+                long long mark = fEngineControl->fBufferSize;
+                if (ptr.fifo_samples >= mark && ptr.fifo_samples < mark + fOSSMaxBlock) {
+                    fOSSReadSync = now;
+                    fOSSReadOffset = -ptr.fifo_samples;
+                }
+            }
+            poll_fd[0].events = 0;
+        }
+        if (poll_fd[1].revents & POLLOUT) {
+            // Check the remaining playback frames.
+            oss_count_t ptr;
+            if (ioctl(fOutFD, SNDCTL_DSP_CURRENT_OPTR, &ptr) != -1 && ptr.fifo_samples >= 0) {
+                if (now - poll_start > 100) {
+                    long long mark = fNperiods * fEngineControl->fBufferSize;
+                    // Relax sync criteria for non-regular hardware block sizes.
+                    long long slack = (fOutBlockSize > 1) ? fOSSMaxBlock : mark;
+                    if (ptr.fifo_samples <= mark && ptr.fifo_samples > mark - slack) {
+                        fOSSWriteSync = now;
+                        fOSSWriteOffset = ptr.fifo_samples;
+                    }
+                }
+                if (fOSSWriteSync != now) {
+                    // Correct possible write offset mismatch after skipping playback data.
+                    long long passed = us_to_samples(now - fOSSWriteSync, fEngineControl->fSampleRate);
+                    long long slack = (fOutBlockSize > 1) ? 0 : fOSSMaxBlock;
+                    // Be conservative, round to nearest block instead of rounding down.
+                    passed += fOutBlockSize / 2;
+                    passed -= (passed % fOutBlockSize);
+                    long long expected = fOSSWriteOffset - passed;
+                    if (ptr.fifo_samples < expected - slack) {
+                        // Correct write offset, possibly results in a sync adjustment.
+                        jack_info("JackOSSDriver::Read low playback buffer of %d, expected %ld", ptr.fifo_samples, expected);
+                        fOSSWriteOffset -= ((expected - slack) - ptr.fifo_samples);
+                    }
+                    // Do the same, but for too many samples in queue.
+                    expected += fOutBlockSize;
+                    if (ptr.fifo_samples > expected + slack && ptr.fifo_samples > 0) {
+                        // Correct write offset, possibly results in a sync adjustment.
+                        jack_info("JackOSSDriver::Read high playback buffer of %d, expected %ld", ptr.fifo_samples, expected);
+                        fOSSWriteOffset += (ptr.fifo_samples - (expected + slack));
+                    }
+                }
+            }
+            poll_fd[1].events = 0;
+        }
+    }
+    return 0;
+}
+
 int JackOSSDriver::OpenInput()
 {
     int flags = 0;
@@ -532,7 +611,6 @@ int JackOSSDriver::OpenOutput()
     }
 
     fOutputBuffer = (void*)calloc(fOutputBufferSize, 1);
-    fFirstCycle = true;
     assert(fOutputBuffer);
 
     if (ProbeOutBlockSize() < 0) {
@@ -691,17 +769,7 @@ void JackOSSDriver::CloseAux()
 
 int JackOSSDriver::Read()
 {
-    if (fInFD < 0) {
-        // Keep begin cycle time
-        JackDriver::CycleTakeBeginTime();
-        return 0;
-    }
-
-    ssize_t count;
-
-    if (fFirstCycle) {
-        fFirstCycle = false;
-
+    if (fInFD > 0 && fOSSReadSync == 0) {
         // Start recording again for the following read.
         int trigger = PCM_ENABLE_INPUT;
         ioctl(fInFD, SNDCTL_DSP_SETTRIGGER, &trigger);
@@ -720,87 +788,24 @@ int JackOSSDriver::Read()
     gCycleTable.fTable[gCycleCount].fBeforeRead = GetMicroSeconds();
 #endif
 
-    if (fOutFD > 0) {
-        jack_time_t poll_start = GetMicroSeconds();
-        jack_time_t now;
-        // Poll until recording and playback buffer are ready for this cycle.
-        pollfd poll_fd[2];
-        poll_fd[0].fd = fInFD;
-        poll_fd[0].events = POLLIN;
-        poll_fd[1].fd = fOutFD;
-        if (fOSSWriteSync != 0) {
-            poll_fd[1].events = POLLOUT;
-        } else {
-            poll_fd[1].events = 0;
-        }
-        while (poll_fd[0].events != 0 || poll_fd[1].events != 0) {
-            poll_fd[0].revents = 0;
-            poll_fd[1].revents = 0;
-            int ret = poll(poll_fd, 2, 500);
-            now = GetMicroSeconds();
-            if (ret <= 0) {
-                jack_error("JackOSSDriver::Read poll failed with %d after %ld us", ret, now - poll_start);
-                break;
-            }
-            if (poll_fd[0].revents & POLLIN) {
-                // Check the excess recording frames.
-                oss_count_t ptr;
-                if (now - poll_start > 100 && ioctl(fInFD, SNDCTL_DSP_CURRENT_IPTR, &ptr) != -1) {
-//                    jack_info("JackOSSDriver::Read recording samples = %ld, fifo_samples = %d", ptr.samples, ptr.fifo_samples);
-                    long long mark = fEngineControl->fBufferSize;
-                    if (ptr.fifo_samples >= mark && ptr.fifo_samples < mark + fOSSMaxBlock) {
-//                        jack_info("JackOSSDriver::Read recording sync to %ld after %ld us", mark - ptr.fifo_samples, now - poll_start);
-                        fOSSReadSync = now;
-                        fOSSReadOffset = -ptr.fifo_samples;
-                    }
-                }
-                poll_fd[0].events = 0;
-            }
-            if (poll_fd[1].revents & POLLOUT) {
-                // Check the remaining playback frames.
-                oss_count_t ptr;
-                if (ioctl(fOutFD, SNDCTL_DSP_CURRENT_OPTR, &ptr) != -1 && ptr.fifo_samples >= 0) {
-                    if (now - poll_start > 100) {
-                        long long mark = fNperiods * fEngineControl->fBufferSize;
-                        // Relax sync criteria for non-regular hardware block sizes.
-                        long long slack = (fOutBlockSize > 1) ? fOSSMaxBlock : mark;
-                        if (ptr.fifo_samples <= mark && ptr.fifo_samples > mark - slack) {
-                            fOSSWriteSync = now;
-                            fOSSWriteOffset = ptr.fifo_samples;
-                        }
-                    }
-                    if (fOSSWriteSync != now) {
-                        // Correct possible write offset mismatch after skipping playback data.
-                        long long passed = us_to_samples(now - fOSSWriteSync, fEngineControl->fSampleRate);
-                        long long slack = (fOutBlockSize > 1) ? 0 : fOSSMaxBlock;
-                        // Be conservative, round to nearest block instead of rounding down.
-                        passed += fOutBlockSize / 2;
-                        passed -= (passed % fOutBlockSize);
-                        long long expected = fOSSWriteOffset - passed;
-                        if (ptr.fifo_samples < expected - slack) {
-                            // Correct write offset, possibly results in a sync adjustment.
-                            jack_info("JackOSSDriver::Read low playback buffer of %d, expected %ld", ptr.fifo_samples, expected);
-                            fOSSWriteOffset -= ((expected - slack) - ptr.fifo_samples);
-                        }
-                        // Do the same, but for too many samples in queue.
-                        expected += fOutBlockSize;
-                        if (ptr.fifo_samples > expected + slack && ptr.fifo_samples > 0) {
-                            // Correct write offset, possibly results in a sync adjustment.
-                            jack_info("JackOSSDriver::Read high playback buffer of %d, expected %ld", ptr.fifo_samples, expected);
-                            fOSSWriteOffset += (ptr.fifo_samples - (expected + slack));
-                        }
-                    }
-                }
-                poll_fd[1].events = 0;
-            }
-        }
-        if (fOSSWriteSync == 0) {
-            // First cycle, match read sync time and write silence for initial latency.
-            fOSSWriteSync = fOSSReadSync;
-            WriteSilence(fNperiods * fOutputBufferSize);
-            fOSSWriteOffset = fNperiods * fEngineControl->fBufferSize;
-        }
+    if (WaitAndSync() < 0) {
+        return -1;
     }
+
+    if (fOutFD > 0 && fOSSWriteSync == 0) {
+        // First cycle, match read sync time and write silence for initial latency.
+        fOSSWriteSync = fOSSReadSync;
+        WriteSilence(fNperiods * fOutputBufferSize);
+        fOSSWriteOffset = fNperiods * fEngineControl->fBufferSize;
+    }
+
+    if (fInFD < 0) {
+        // Keep begin cycle time
+        JackDriver::CycleTakeBeginTime();
+        return 0;
+    }
+
+    ssize_t count;
 
     audio_errinfo ei_in;
     count = ::read(fInFD, fInputBuffer, fInputBufferSize);
@@ -902,14 +907,6 @@ int JackOSSDriver::Write()
     ssize_t count;
     unsigned int skip = 0;
     audio_errinfo ei_out;
-
-    // Maybe necessary to write an empty output buffer first time : see http://manuals.opensound.com/developer/fulldup.c.html
-    if (fFirstCycle) {
-        fFirstCycle = false;
-        if (WriteSilence(fNperiods * fOutputBufferSize) < 0) {
-            return -1;
-        }
-    }
 
 #ifdef JACK_MONITOR
     gCycleTable.fTable[gCycleCount].fBeforeWriteConvert = GetMicroSeconds();
