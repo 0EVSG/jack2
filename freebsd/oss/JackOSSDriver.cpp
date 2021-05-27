@@ -38,6 +38,23 @@ Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 
 using namespace std;
 
+namespace
+{
+
+inline jack_time_t frames_to_us(jack_nframes_t frames, jack_nframes_t sample_rate) {
+    return ((frames * 1000000ULL) + (sample_rate / 2ULL)) / sample_rate;
+}
+
+inline jack_nframes_t round_up(jack_nframes_t frames, jack_nframes_t block) {
+    if (block > 0) {
+        frames += (block - 1);
+        frames -= (frames % block);
+    }
+    return frames;
+}
+
+}
+
 namespace Jack
 {
 
@@ -323,17 +340,37 @@ int JackOSSDriver::WriteSilence(jack_nframes_t frames)
 
 int JackOSSDriver::WaitAndSync()
 {
+    jack_time_t expected_read_sync = fOSSReadSync;
+    long long expected_read_remainder = fOSSReadOffset;
+    if (fInFD > 0 && fOSSReadSync != 0) {
+        if (fOSSReadOffset + fEngineControl->fBufferSize > 0) {
+            jack_nframes_t frames = fOSSReadOffset + fEngineControl->fBufferSize;
+            jack_nframes_t rounded = round_up(frames, fInBlockSize);
+            expected_read_sync += frames_to_us(rounded, fEngineControl->fSampleRate);
+            expected_read_remainder = fOSSReadOffset - rounded;
+        }
+    }
+    jack_time_t expected_write_sync = fOSSWriteSync;
+    long long expected_write_remainder = fOSSWriteOffset;
+    if (fOutFD > 0 && fOSSWriteSync != 0) {
+        if (fOSSWriteOffset > fNperiods * fEngineControl->fBufferSize) {
+            jack_nframes_t frames = fOSSWriteOffset - fNperiods * fEngineControl->fBufferSize;
+            jack_nframes_t rounded = round_up(frames, fOutBlockSize);
+            expected_write_sync += frames_to_us(rounded, fEngineControl->fSampleRate);
+            expected_write_remainder = fOSSWriteOffset - rounded;
+        }
+    }
     jack_time_t poll_start = GetMicroSeconds();
     // Poll until recording and playback buffer are ready for this cycle.
     pollfd poll_fd[2];
     poll_fd[0].fd = fInFD;
-    if (fInFD > 0) {
+    if (fInFD > 0 && poll_start < expected_read_sync) {
         poll_fd[0].events = POLLIN;
     } else {
         poll_fd[0].events = 0;
     }
     poll_fd[1].fd = fOutFD;
-    if (fOutFD > 0 && fOSSWriteSync != 0) {
+    if (fOutFD > 0 && fOSSWriteSync != 0 && poll_start < expected_write_sync) {
         poll_fd[1].events = POLLOUT;
     } else {
         poll_fd[1].events = 0;
@@ -348,6 +385,11 @@ int JackOSSDriver::WaitAndSync()
             return ret;
         }
         if (poll_fd[0].revents & POLLIN) {
+            // Warn if expected sync time differs by 1 ms.
+            long long read_dt = (long long)expected_read_sync - (long long)now;
+            if (read_dt < -1000 || read_dt > 1000) {
+                jack_info("JackOSSDriver::Read sync read dt=%ld", read_dt);
+            }
             // Check the excess recording frames.
             oss_count_t ptr;
             if (now - poll_start > 100 && ioctl(fInFD, SNDCTL_DSP_CURRENT_IPTR, &ptr) != -1) {
@@ -355,11 +397,21 @@ int JackOSSDriver::WaitAndSync()
                 if (ptr.fifo_samples >= mark && ptr.fifo_samples < mark + fOSSMaxBlock) {
                     fOSSReadSync = now;
                     fOSSReadOffset = -ptr.fifo_samples;
+                    // Warn if expected offset differs by more than 48 samples.
+                    long long off_diff = expected_read_remainder - fOSSReadOffset;
+                    if (off_diff < -48 || off_diff > 48) {
+                        jack_info("JackOSSDriver::Read sync read off_diff=%ld", off_diff);
+                    }
                 }
             }
             poll_fd[0].events = 0;
         }
         if (poll_fd[1].revents & POLLOUT) {
+            // Warn if expected sync time differs by 1 ms.
+            long long write_dt = (long long)expected_write_sync - (long long)now;
+            if (write_dt < -1000 || write_dt > 1000) {
+                jack_info("JackOSSDriver::Read sync write dt=%ld", write_dt);
+            }
             // Check the remaining playback frames.
             oss_count_t ptr;
             if (ioctl(fOutFD, SNDCTL_DSP_CURRENT_OPTR, &ptr) != -1 && ptr.fifo_samples >= 0) {
@@ -370,6 +422,11 @@ int JackOSSDriver::WaitAndSync()
                     if (ptr.fifo_samples <= mark && ptr.fifo_samples > mark - slack) {
                         fOSSWriteSync = now;
                         fOSSWriteOffset = ptr.fifo_samples;
+                        // Warn if expected offset differs by more than 48 samples.
+                        long long off_diff = expected_write_remainder - fOSSWriteOffset;
+                        if (off_diff < -48 || off_diff > 48) {
+                            jack_info("JackOSSDriver::Read sync write off_diff=%ld", off_diff);
+                        }
                     }
                 }
                 if (fOSSWriteSync != now) {
