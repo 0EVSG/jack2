@@ -395,6 +395,7 @@ int JackOSSDriver::WaitAndSync()
                 if (off_diff < -48 || off_diff > 48) {
                     jack_info("JackOSSDriver::Read sync read off_diff=%ld", off_diff);
                 }
+                //! \todo Immediately adjust sync time for big differences on regular devices.
                 fOSSReadSync = (fOSSReadSync + now) / 2;
                 fOSSReadOffset = -ptr.fifo_samples;
             }
@@ -414,6 +415,7 @@ int JackOSSDriver::WaitAndSync()
                 if (off_diff < -48 || off_diff > 48) {
                     jack_info("JackOSSDriver::Read sync write off_diff=%ld", off_diff);
                 }
+                //! \todo Immediately adjust sync time for big differences on regular devices.
                 fOSSWriteSync = (fOSSWriteSync + now) / 2;
                 fOSSWriteOffset = ptr.fifo_samples;
             }
@@ -792,6 +794,7 @@ int JackOSSDriver::Read()
         fOSSReadOffset = 0;
         // In duplex mode, start playback right after recording with some silence.
         // Consistently results in a total of (1 + nperiod) * period frames in flight.
+        //! \todo Check again with virtual_oss start correction.
 //        if (fOutFD > 0) {
 //            WriteSilence((fNperiods + 1) * fOutputBufferSize);
 //            fOSSWriteSync = GetMicroSeconds();
@@ -809,9 +812,12 @@ int JackOSSDriver::Read()
 
     if (fOutFD > 0 && fOSSWriteSync == 0) {
         // First cycle, match read sync time and write silence for initial latency.
-        fOSSWriteSync = fOSSReadSync;
+        fOSSWriteSync = GetMicroSeconds();
+        fOSSWriteOffset = 0;
         WriteSilence(fNperiods * fEngineControl->fBufferSize);
     }
+
+    //! \todo Always take cycle begin time here!
 
     if (fInFD < 0) {
         // Keep begin cycle time
@@ -854,17 +860,6 @@ int JackOSSDriver::Read()
         jack_time_t now = GetMicroSeconds();
         jack_info("JackOSSDriver::Read recording offset %ld sync %ld ago", fOSSReadOffset, now - fOSSReadSync);
         jack_info("JackOSSDriver::Read playback offset %ld sync %ld ago", fOSSWriteOffset, now - fOSSWriteSync);
-//        count_info info;
-//        if (ioctl(fInFD, SNDCTL_DSP_GETIPTR, &info) != -1) {
-//            jack_info("JackOSSDriver::Read recording bytes = %d, blocks = %d, ptr = %d", info.bytes, info.blocks, info.ptr);
-//        }
-//        if (fOutFD > 0 && ioctl(fOutFD, SNDCTL_DSP_GETOPTR, &info) != -1) {
-//            jack_info("JackOSSDriver::Read playback bytes = %d, blocks = %d, ptr = %d", info.bytes, info.blocks, info.ptr);
-//        }
-//        int delay = 0;
-//        if (ioctl(fOutFD, SNDCTL_DSP_GETODELAY, &delay) == 0) {
-//            jack_info("JackOSSDriver::Read playback latency = %ld", delay / (fSampleSize * fPlaybackChannels));
-//        }
         jack_info("JackOSSDriver::Read total recorded samples = %ld", sample_count);
     }
 
@@ -880,6 +875,7 @@ int JackOSSDriver::Read()
         if (ei_in.rec_overruns > 0 ) {
             jack_error("JackOSSDriver::Read overruns = %d", ei_in.rec_overruns);
             jack_time_t cur_time = GetMicroSeconds();
+            //! \todo Improve overrun notification with real time info.
             NotifyXRun(cur_time, float(cur_time - fBeginDateUst));   // Better this value than nothing...
         }
 
@@ -926,9 +922,11 @@ int JackOSSDriver::Write()
         jack_time_t now = GetMicroSeconds();
         long long progress = fEngineControl->fBufferSize;
         if (fInFD > 0) {
+            //! \todo Also check that sync differenc does not exceed half a period.
             jack_time_t slack = frames_to_us(fOSSMaxBlock, fEngineControl->fSampleRate);
             if (fOSSReadSync > fOSSWriteSync + slack) {
                 // Write silence to delay write sync, bring it closer to read sync.
+                //! \todo Fill from remainder up to the middle of a block.
                 jack_nframes_t fill = us_to_samples(fOSSReadSync - fOSSWriteSync, fEngineControl->fSampleRate);
                 jack_info("JackOSSDriver::Write recording offset %ld sync %ld ago", fOSSReadOffset, now - fOSSReadSync);
                 jack_info("JackOSSDriver::Write playback offset %ld sync %ld ago", fOSSWriteOffset, now - fOSSWriteSync);
@@ -937,6 +935,7 @@ int JackOSSDriver::Write()
             }
             if (fOSSWriteSync > fOSSReadSync + slack) {
                 // Skip frames for earlier write sync, bring it closer to read sync.
+                //! \todo Omit from remainder down to the middle of a block.
                 jack_nframes_t omit = us_to_samples(fOSSWriteSync - fOSSReadSync, fEngineControl->fSampleRate);
                 jack_info("JackOSSDriver::Write recording offset %ld sync %ld ago", fOSSReadOffset, now - fOSSReadSync);
                 jack_info("JackOSSDriver::Write playback offset %ld sync %ld ago", fOSSWriteOffset, now - fOSSWriteSync);
@@ -954,16 +953,16 @@ int JackOSSDriver::Write()
             jack_error("JackOSSDriver::Write late by %ld, skip %ld frames", passed - fOSSWriteOffset, overdue);
             jack_error("JackOSSDriver::Write %ld frame offset from sync %ld us ago", fOSSWriteOffset, now - fOSSWriteSync);
         }
-        long long to_be_written = progress - overdue;
-        if (to_be_written > fEngineControl->fBufferSize) {
-            jack_nframes_t fill = to_be_written - fEngineControl->fBufferSize;
+        long long write_length = progress - overdue;
+        if (write_length > fEngineControl->fBufferSize) {
+            jack_nframes_t fill = write_length - fEngineControl->fBufferSize;
             WriteSilence(fill);
         }
-        if (to_be_written <= 0) {
+        if (write_length <= 0) {
             skip += fOutputBufferSize;
             fOSSWriteOffset += progress;
-        } else if (to_be_written < fEngineControl->fBufferSize) {
-            skip += (fEngineControl->fBufferSize - to_be_written) * fSampleSize * fPlaybackChannels;
+        } else if (write_length < fEngineControl->fBufferSize) {
+            skip += (fEngineControl->fBufferSize - write_length) * fSampleSize * fPlaybackChannels;
             fOSSWriteOffset += overdue;
         }
     }
@@ -1016,6 +1015,7 @@ int JackOSSDriver::Write()
         if (ei_out.play_underruns > 0) {
             jack_error("JackOSSDriver::Write underruns = %d", ei_out.play_underruns);
             jack_time_t cur_time = GetMicroSeconds();
+            //! \todo Improve underrun notification with real time info.
             NotifyXRun(cur_time, float(cur_time - fBeginDateUst));   // Better this value than nothing...
         }
 
