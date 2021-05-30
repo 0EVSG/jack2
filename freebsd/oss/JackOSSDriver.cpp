@@ -53,6 +53,21 @@ inline jack_nframes_t round_up(jack_nframes_t frames, jack_nframes_t block) {
     return frames;
 }
 
+inline jack_time_t round(jack_time_t time, jack_time_t interval) {
+    if (interval > 0) {
+        time += (interval / 2);
+        time -= (time % interval);
+    }
+    return time;
+}
+
+inline jack_time_t round_down(jack_time_t time, jack_time_t interval) {
+    if (interval > 0) {
+        time -= (time % interval);
+    }
+    return time;
+}
+
 }
 
 namespace Jack
@@ -382,42 +397,72 @@ int JackOSSDriver::WaitAndSync()
             return ret;
         }
         if (poll_fd[0].revents & POLLIN) {
-            // Warn if expected sync time differs by 1 ms.
-            long long read_dt = (long long)fOSSReadSync - (long long)now;
-            if (read_dt < -1000 || read_dt > 1000) {
-                jack_info("JackOSSDriver::Read sync read_dt=%ld", read_dt);
-            }
             // Check the excess recording frames.
             oss_count_t ptr;
             if (ioctl(fInFD, SNDCTL_DSP_CURRENT_IPTR, &ptr) != -1 && ptr.fifo_samples >= 0) {
-                // Warn if expected offset differs by more than 48 samples.
-                long long off_diff = fOSSReadOffset + ptr.fifo_samples;
-                if (off_diff < -48 || off_diff > 48) {
-                    jack_info("JackOSSDriver::Read sync read off_diff=%ld", off_diff);
+                if (fInBlockSize <= 1) {
+                    // Irregular block size, let sync time converge.
+                    fOSSReadSync = (fOSSReadSync + now) / 2;
+                    fOSSReadOffset = -ptr.fifo_samples;
+                } else if (ptr.fifo_samples - fEngineControl->fBufferSize >= fInBlockSize) {
+                    // Late syncs are unreliable here, discard.
+                } else {
+                    // Warn if expected offset differs by more than 48 samples.
+                    long long off_diff = fOSSReadOffset + ptr.fifo_samples;
+                    if (off_diff < -48 || off_diff > 48) {
+                        jack_info("JackOSSDriver::Read sync read off_diff=%ld", off_diff);
+                    }
+                    // Adapt expected sync time when early or late - in whole block intervals.
+                    // Account for some speed drift, but otherwise round down to earlier interval.
+                    jack_time_t interval = frames_to_us(fInBlockSize, fEngineControl->fSampleRate);
+                    jack_time_t remainder = fOSSReadSync % interval;
+                    jack_time_t max_drift = interval / 8;
+                    jack_time_t rounded = round_down((now - remainder) + max_drift, interval) + remainder;
+                    //! \todo Streamline debug output.
+                    if (rounded < fOSSReadSync) {
+                        jack_info("JackOSSDriver::Read capture poll sync early by %ld us, round to %ld us", fOSSReadSync - now, fOSSReadSync - rounded);
+                    } else if (rounded > fOSSReadSync) {
+                        jack_info("JackOSSDriver::Read capture poll sync late by %ld us, round to %ld us", now - fOSSReadSync, rounded - fOSSReadSync);
+                    }
+                    // Let sync time converge slowly when late, prefer earlier sync times.
+                    fOSSReadSync = min(rounded, now) / 2 + now / 2;
+                    fOSSReadOffset = -ptr.fifo_samples;
                 }
-                //! \todo Immediately adjust sync time for big differences on regular devices.
-                fOSSReadSync = (fOSSReadSync + now) / 2;
-                fOSSReadOffset = -ptr.fifo_samples;
             }
             poll_fd[0].events = 0;
         }
         if (poll_fd[1].revents & POLLOUT) {
-            // Warn if expected sync time differs by 1 ms.
-            long long write_dt = (long long)fOSSWriteSync - (long long)now;
-            if (write_dt < -1000 || write_dt > 1000) {
-                jack_info("JackOSSDriver::Read sync write_dt=%ld", write_dt);
-            }
             // Check the remaining playback frames.
             oss_count_t ptr;
             if (ioctl(fOutFD, SNDCTL_DSP_CURRENT_OPTR, &ptr) != -1 && ptr.fifo_samples >= 0) {
-                // Warn if expected offset differs by more than 48 samples.
-                long long off_diff = fOSSWriteOffset - ptr.fifo_samples;
-                if (off_diff < -48 || off_diff > 48) {
-                    jack_info("JackOSSDriver::Read sync write off_diff=%ld", off_diff);
+                if (fOutBlockSize <= 1) {
+                    // Irregular block size, let sync time converge.
+                    fOSSWriteSync = (fOSSWriteSync + now) / 2;
+                    fOSSWriteOffset = ptr.fifo_samples;
+                } else if (ptr.fifo_samples + fOutBlockSize <= fNperiods * fEngineControl->fBufferSize) {
+                    // Late syncs are unreliable here, discard.
+                } else {
+                    // Warn if expected offset differs by more than 48 samples.
+                    long long off_diff = fOSSWriteOffset - ptr.fifo_samples;
+                    if (off_diff < -48 || off_diff > 48) {
+                        jack_info("JackOSSDriver::Read sync write off_diff=%ld", off_diff);
+                    }
+                    // Adapt expected sync time when early or late - in whole block intervals.
+                    // Account for some speed drift, but otherwise round down to earlier interval.
+                    jack_time_t interval = frames_to_us(fOutBlockSize, fEngineControl->fSampleRate);
+                    jack_time_t remainder = fOSSWriteSync % interval;
+                    jack_time_t max_drift = interval / 8;
+                    jack_time_t rounded = round_down((now - remainder) + max_drift, interval) + remainder;
+                    //! \todo Streamline debug output.
+                    if (rounded < fOSSWriteSync) {
+                        jack_info("JackOSSDriver::Read capture poll sync early by %ld us, round to %ld us", fOSSWriteSync - now, fOSSWriteSync - rounded);
+                    } else if (rounded > fOSSWriteSync) {
+                        jack_info("JackOSSDriver::Read capture poll sync late by %ld us, round to %ld us", now - fOSSWriteSync, rounded - fOSSWriteSync);
+                    }
+                    // Let sync time converge slowly when late, prefer earlier sync times.
+                    fOSSWriteSync = min(rounded, now) / 2 + now / 2;
+                    fOSSWriteOffset = ptr.fifo_samples;
                 }
-                //! \todo Immediately adjust sync time for big differences on regular devices.
-                fOSSWriteSync = (fOSSWriteSync + now) / 2;
-                fOSSWriteOffset = ptr.fifo_samples;
             }
             poll_fd[1].events = 0;
         }
