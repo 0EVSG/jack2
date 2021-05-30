@@ -328,12 +328,13 @@ int JackOSSDriver::WriteSilence(jack_nframes_t frames)
     unsigned int size = frames * fSampleSize * fPlaybackChannels;
     while (size > 0) {
         ssize_t chunk = (size > fOutputBufferSize) ? fOutputBufferSize : size;
-        size -= chunk;
         ssize_t count = ::write(fOutFD, fOutputBuffer, chunk);
-        if (count < chunk) {
+        if (count <= 0) {
             jack_error("JackOSSDriver::WriteSilence error bytes written = %ld", count);
             return -1;
         }
+        fOSSWriteOffset += (count / (fSampleSize * fPlaybackChannels));
+        size -= count;
     }
     return 0;
 }
@@ -810,7 +811,6 @@ int JackOSSDriver::Read()
         // First cycle, match read sync time and write silence for initial latency.
         fOSSWriteSync = fOSSReadSync;
         WriteSilence(fNperiods * fEngineControl->fBufferSize);
-        fOSSWriteOffset = fNperiods * fEngineControl->fBufferSize;
     }
 
     if (fInFD < 0) {
@@ -958,7 +958,6 @@ int JackOSSDriver::Write()
         if (to_be_written > fEngineControl->fBufferSize) {
             jack_nframes_t fill = to_be_written - fEngineControl->fBufferSize;
             WriteSilence(fill);
-            fOSSWriteOffset += fill;
         }
         if (to_be_written <= 0) {
             skip += fOutputBufferSize;
