@@ -401,11 +401,11 @@ int JackOSSDriver::WaitAndSync()
             oss_count_t ptr;
             if (ioctl(fInFD, SNDCTL_DSP_CURRENT_IPTR, &ptr) != -1 && ptr.fifo_samples >= 0) {
                 if (fInBlockSize <= 1) {
-                    // Irregular block size, let sync time converge.
-                    fOSSReadSync = (fOSSReadSync + now) / 2;
+                    // Irregular block size, let sync time converge slowly when late.
+                    fOSSReadSync = min(fOSSReadSync, now) / 2 + now / 2;
                     fOSSReadOffset = -ptr.fifo_samples;
                 } else if (ptr.fifo_samples - fEngineControl->fBufferSize >= fInBlockSize) {
-                    // Late syncs are unreliable here, discard.
+                    // Too late for a reliable sync, discard.
                 } else {
                     // Warn if expected offset differs by more than 48 samples.
                     long long off_diff = fOSSReadOffset + ptr.fifo_samples;
@@ -436,11 +436,11 @@ int JackOSSDriver::WaitAndSync()
             oss_count_t ptr;
             if (ioctl(fOutFD, SNDCTL_DSP_CURRENT_OPTR, &ptr) != -1 && ptr.fifo_samples >= 0) {
                 if (fOutBlockSize <= 1) {
-                    // Irregular block size, let sync time converge.
-                    fOSSWriteSync = (fOSSWriteSync + now) / 2;
+                    // Irregular block size, let sync time converge slowly when late.
+                    fOSSWriteSync = min(fOSSWriteSync, now) / 2 + now / 2;
                     fOSSWriteOffset = ptr.fifo_samples;
                 } else if (ptr.fifo_samples + fOutBlockSize <= fNperiods * fEngineControl->fBufferSize) {
-                    // Late syncs are unreliable here, discard.
+                    // Too late for a reliable sync, discard.
                 } else {
                     // Warn if expected offset differs by more than 48 samples.
                     long long off_diff = fOSSWriteOffset - ptr.fifo_samples;
