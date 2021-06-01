@@ -53,6 +53,15 @@ inline jack_nframes_t round_up(jack_nframes_t frames, jack_nframes_t block) {
     return frames;
 }
 
+inline jack_nframes_t round_to(jack_nframes_t frames, jack_nframes_t block)
+{
+    if (block > 0) {
+        frames += (block / 2);
+        frames -= (frames % block);
+    }
+    return frames;
+}
+
 inline jack_time_t round(jack_time_t time, jack_time_t interval) {
     if (interval > 0) {
         time += (interval / 2);
@@ -971,8 +980,8 @@ int JackOSSDriver::Write()
             jack_time_t slack = frames_to_us(fOSSMaxBlock, fEngineControl->fSampleRate);
             if (fOSSReadSync > fOSSWriteSync + slack) {
                 // Write silence to delay write sync, bring it closer to read sync.
-                //! \todo Fill from remainder up to the middle of a block.
                 jack_nframes_t fill = us_to_samples(fOSSReadSync - fOSSWriteSync, fEngineControl->fSampleRate);
+                fill = round_to(fill, fOutBlockSize) + (fOutBlockSize / 2) - (fOSSWriteOffset % fOutBlockSize);
                 jack_info("JackOSSDriver::Write recording offset %ld sync %ld ago", fOSSReadOffset, now - fOSSReadSync);
                 jack_info("JackOSSDriver::Write playback offset %ld sync %ld ago", fOSSWriteOffset, now - fOSSWriteSync);
                 jack_info("JackOSSDriver::Write fill up %ld", fill);
@@ -980,8 +989,8 @@ int JackOSSDriver::Write()
             }
             if (fOSSWriteSync > fOSSReadSync + slack) {
                 // Skip frames for earlier write sync, bring it closer to read sync.
-                //! \todo Omit from remainder down to the middle of a block.
                 jack_nframes_t omit = us_to_samples(fOSSWriteSync - fOSSReadSync, fEngineControl->fSampleRate);
+                omit = round_to(omit, fOutBlockSize) + (fOSSWriteOffset % fOutBlockSize) - (fOutBlockSize / 2);
                 jack_info("JackOSSDriver::Write recording offset %ld sync %ld ago", fOSSReadOffset, now - fOSSReadSync);
                 jack_info("JackOSSDriver::Write playback offset %ld sync %ld ago", fOSSWriteOffset, now - fOSSWriteSync);
                 jack_info("JackOSSDriver::Write skip %ld", omit);
