@@ -337,6 +337,7 @@ int JackOSSDriver::ProbeInBlockSize()
 int JackOSSDriver::ProbeOutBlockSize()
 {
     // Just use capture block size for now.
+    //! \todo Implement independent of capture block size.
     fOutBlockSize = fInBlockSize;
     return 0;
 }
@@ -510,6 +511,7 @@ int JackOSSDriver::OpenInput()
         goto error;
     }
     if (cur_sample_format != fSampleFormat) {
+        //! \todo Actually change sample format and size.
         jack_info("JackOSSDriver::OpenInput driver forced the sample format %ld", fSampleFormat);
     }
 
@@ -617,6 +619,7 @@ int JackOSSDriver::OpenOutput()
         goto error;
     }
     if (cur_sample_format != fSampleFormat) {
+        //! \todo Actually change sample format and size.
         jack_info("JackOSSDriver::OpenOutput driver forced the sample format %ld", fSampleFormat);
     }
 
@@ -720,6 +723,7 @@ int JackOSSDriver::Open(jack_nframes_t nframes,
         return -1;
     } else {
 
+        //! \todo Test in asynchronous mode.
         if (!fEngineControl->fSyncMode) {
             jack_error("Cannot run in asynchronous mode, use the -S parameter for jackd");
             return -1;
@@ -1092,6 +1096,7 @@ int JackOSSDriver::Write()
 int JackOSSDriver::SetBufferSize(jack_nframes_t buffer_size)
 {
     CloseAux();
+    //! \todo Adjust the latency values when changing buffer size.
     JackAudioDriver::SetBufferSize(buffer_size); // Generic change, never fails
     return OpenAux();
 }
