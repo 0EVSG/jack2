@@ -714,6 +714,7 @@ int JackOSSDriver::Open(jack_nframes_t nframes,
                       int bits,
                       bool ignorehwbuf)
 {
+    //! \todo Test latencies in asynchronous mode.
     // Additional playback latency as requested by the user.
     // This way the remaining latency should be symmetric as reported by jack_iodelay.
     playback_latency += user_nperiods * nframes;
@@ -722,12 +723,6 @@ int JackOSSDriver::Open(jack_nframes_t nframes,
         capture_driver_uid, playback_driver_uid, capture_latency, playback_latency) != 0) {
         return -1;
     } else {
-
-        //! \todo Test in asynchronous mode.
-        if (!fEngineControl->fSyncMode) {
-            jack_error("Cannot run in asynchronous mode, use the -S parameter for jackd");
-            return -1;
-        }
 
         fCapture = capturing;
         fPlayback = playing;
