@@ -845,14 +845,24 @@ int JackOSSDriver::Read()
         ioctl(fInFD, SNDCTL_DSP_SETTRIGGER, &trigger);
         fOSSReadSync = GetMicroSeconds();
         fOSSReadOffset = 0;
+        if (fInBlockSize > 1) {
+            ssize_t discard = (fInBlockSize / 2) * fSampleSize * fCaptureChannels;
+            discard = ::read(fInFD, fInputBuffer, discard);
+            if (discard > 0) {
+                fOSSReadOffset += discard / (fSampleSize * fCaptureChannels);
+            }
+        }
         // In duplex mode, start playback right after recording with some silence.
         // Consistently results in a total of (1 + nperiod) * period frames in flight.
-        //! \todo Check again with virtual_oss start correction.
-//        if (fOutFD > 0) {
-//            WriteSilence((fNperiods + 1) * fOutputBufferSize);
-//            fOSSWriteSync = GetMicroSeconds();
-//            fOSSWriteOffset = (fNperiods + 1) * fEngineControl->fBufferSize;
-//        }
+        if (fOutFD > 0) {
+            fOSSWriteSync = GetMicroSeconds();
+            fOSSWriteOffset = 0;
+            jack_nframes_t silence = (fNperiods + 1) * fEngineControl->fBufferSize;
+            if (fOutBlockSize > 1) {
+                silence -= (fOutBlockSize / 2);
+            }
+            WriteSilence(silence);
+        }
     }
 
 #ifdef JACK_MONITOR
@@ -861,13 +871,6 @@ int JackOSSDriver::Read()
 
     if (WaitAndSync() < 0) {
         return -1;
-    }
-
-    if (fOutFD > 0 && fOSSWriteSync == 0) {
-        // First cycle, match read sync time and write silence for initial latency.
-        fOSSWriteSync = GetMicroSeconds();
-        fOSSWriteOffset = 0;
-        WriteSilence(fNperiods * fEngineControl->fBufferSize);
     }
 
     //! \todo Always take cycle begin time here!
