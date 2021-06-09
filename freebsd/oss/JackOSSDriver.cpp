@@ -347,7 +347,7 @@ int JackOSSDriver::ProbeOutBlockSize()
             poll_fd.events = POLLOUT;
             ret = poll(&poll_fd, 1, 500);
             if (ret <= 0) {
-                jack_error("JackOSSDriver::Read poll failed with %d", ret);
+                jack_error("JackOSSDriver::ProbeOutBlockSize poll failed with %d", ret);
             }
             if (poll_fd.revents & POLLOUT) {
                 oss_count_t ptr;
@@ -445,7 +445,7 @@ int JackOSSDriver::WaitAndSync()
         int ret = poll(poll_fd, 2, 500);
         jack_time_t now = GetMicroSeconds();
         if (ret <= 0) {
-            jack_error("JackOSSDriver::Read poll failed with %d after %ld us", ret, now - poll_start);
+            jack_error("JackOSSDriver::WaitAndSync poll failed with %d after %ld us", ret, now - poll_start);
             return ret;
         }
         if (poll_fd[0].revents & POLLIN) {
@@ -462,7 +462,7 @@ int JackOSSDriver::WaitAndSync()
                     // Warn if expected offset differs by more than 48 samples.
                     long long off_diff = fOSSReadOffset + ptr.fifo_samples;
                     if (off_diff < -48 || off_diff > 48) {
-                        jack_info("JackOSSDriver::Read sync read off_diff=%ld", off_diff);
+                        jack_info("JackOSSDriver::WaitAndSync read fifo off_diff=%ld", off_diff);
                     }
                     // Adapt expected sync time when early or late - in whole block intervals.
                     // Account for some speed drift, but otherwise round down to earlier interval.
@@ -472,9 +472,9 @@ int JackOSSDriver::WaitAndSync()
                     jack_time_t rounded = round_down((now - remainder) + max_drift, interval) + remainder;
                     //! \todo Streamline debug output.
                     if (rounded < fOSSReadSync) {
-                        jack_info("JackOSSDriver::Read capture poll sync early by %ld us, round to %ld us", fOSSReadSync - now, fOSSReadSync - rounded);
+                        jack_info("JackOSSDriver::WaitAndSync capture sync early by %ld us, round to %ld us", fOSSReadSync - now, fOSSReadSync - rounded);
                     } else if (rounded > fOSSReadSync) {
-                        jack_info("JackOSSDriver::Read capture poll sync late by %ld us, round to %ld us", now - fOSSReadSync, rounded - fOSSReadSync);
+                        jack_info("JackOSSDriver::WaitAndSync capture sync late by %ld us, round to %ld us", now - fOSSReadSync, rounded - fOSSReadSync);
                     }
                     // Let sync time converge slowly when late, prefer earlier sync times.
                     fOSSReadSync = min(rounded, now) / 2 + now / 2;
@@ -497,7 +497,7 @@ int JackOSSDriver::WaitAndSync()
                     // Warn if expected offset differs by more than 48 samples.
                     long long off_diff = fOSSWriteOffset - ptr.fifo_samples;
                     if (off_diff < -48 || off_diff > 48) {
-                        jack_info("JackOSSDriver::Read sync write off_diff=%ld", off_diff);
+                        jack_info("JackOSSDriver::WaitAndSync write fifo off_diff=%ld", off_diff);
                     }
                     // Adapt expected sync time when early or late - in whole block intervals.
                     // Account for some speed drift, but otherwise round down to earlier interval.
@@ -507,9 +507,9 @@ int JackOSSDriver::WaitAndSync()
                     jack_time_t rounded = round_down((now - remainder) + max_drift, interval) + remainder;
                     //! \todo Streamline debug output.
                     if (rounded < fOSSWriteSync) {
-                        jack_info("JackOSSDriver::Read capture poll sync early by %ld us, round to %ld us", fOSSWriteSync - now, fOSSWriteSync - rounded);
+                        jack_info("JackOSSDriver::WaitAndSync playback sync early by %ld us, round to %ld us", fOSSWriteSync - now, fOSSWriteSync - rounded);
                     } else if (rounded > fOSSWriteSync) {
-                        jack_info("JackOSSDriver::Read capture poll sync late by %ld us, round to %ld us", now - fOSSWriteSync, rounded - fOSSWriteSync);
+                        jack_info("JackOSSDriver::WaitAndSync playback sync late by %ld us, round to %ld us", now - fOSSWriteSync, rounded - fOSSWriteSync);
                     }
                     // Let sync time converge slowly when late, prefer earlier sync times.
                     fOSSWriteSync = min(rounded, now) / 2 + now / 2;
