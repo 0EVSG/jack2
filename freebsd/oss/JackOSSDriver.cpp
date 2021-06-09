@@ -299,7 +299,7 @@ int JackOSSDriver::ProbeInBlockSize()
                     } else {
                         // Hardware block size is more than a period, irregular cycle timing.
                         //! \todo Issue a warning here instead of info.
-                        jack_info("JackOSSDriver::Read hardware block size %d > period", probes[p]);
+                        jack_info("JackOSSDriver::ProbeInBlockSize hardware block size %d > period", probes[p]);
                     }
                 }
             }
@@ -308,7 +308,7 @@ int JackOSSDriver::ProbeInBlockSize()
         // Examine probes of hardware block size.
         fOSSMaxBlock = 1;
         for (int p = 0; p < 8; ++p) {
-            jack_info("JackOSSDriver::Read hardware block of %d", probes[p]);
+            jack_info("JackOSSDriver::ProbeInBlockSize hardware block of %d", probes[p]);
             if (probes[p] > fOSSMaxBlock) {
                 fOSSMaxBlock = probes[p];
             }
@@ -336,10 +336,52 @@ int JackOSSDriver::ProbeInBlockSize()
 
 int JackOSSDriver::ProbeOutBlockSize()
 {
-    // Just use capture block size for now.
-    //! \todo Implement independent of capture block size.
-    fOutBlockSize = fInBlockSize;
-    return 0;
+    if (fOutFD) {
+        int ret = 0;
+        jack_nframes_t mark = (fNperiods * fEngineControl->fBufferSize) + 1;
+        WriteSilence(mark);
+        jack_nframes_t probes[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+        for (int p = 0; p < 8 && ret >= 0; ++p) {
+            pollfd poll_fd;
+            poll_fd.fd = fOutFD;
+            poll_fd.events = POLLOUT;
+            ret = poll(&poll_fd, 1, 500);
+            if (ret <= 0) {
+                jack_error("JackOSSDriver::Read poll failed with %d", ret);
+            }
+            if (poll_fd.revents & POLLOUT) {
+                oss_count_t ptr;
+                if (ioctl(fOutFD, SNDCTL_DSP_CURRENT_OPTR, &ptr) != -1 && ptr.fifo_samples >= 0) {
+                    probes[p] = mark - ptr.fifo_samples;
+                    WriteSilence(probes[p]);
+                }
+                poll_fd.revents = 0;
+            }
+        }
+
+        // Examine probes of hardware block size.
+        jack_nframes_t fOutMaxBlock = 1;
+        fOutBlockSize = probes[3];
+        for (int p = 4; p < 8; ++p) {
+            jack_info("JackOSSDriver::ProbeOutBlockSize hardware block of %d", probes[p]);
+            if (probes[p] > fOutMaxBlock) {
+                fOutMaxBlock = probes[p];
+            }
+            if (probes[p] != fOutBlockSize) {
+                fOutBlockSize = 1;
+            }
+        }
+        jack_info("JackOSSDriver::ProbeOutBlockSize hardware block size %d", fOutBlockSize);
+        jack_info("JackOSSDriver::ProbeOutBlockSize max block size %d", fOutMaxBlock);
+
+        // Stop recording to reset the recording buffer.
+        int trigger = 0;
+        ioctl(fOutFD, SNDCTL_DSP_SETTRIGGER, &trigger);
+        return 0;
+    }
+
+    fOutBlockSize = 1;
+    return -1;
 }
 
 int JackOSSDriver::WriteSilence(jack_nframes_t frames)
