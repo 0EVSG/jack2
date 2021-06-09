@@ -1021,7 +1021,7 @@ int JackOSSDriver::Write()
         long long progress = fEngineControl->fBufferSize;
         if (fInFD > 0) {
             //! \todo Also check that sync differenc does not exceed half a period.
-            jack_time_t slack = frames_to_us(fOSSMaxBlock, fEngineControl->fSampleRate);
+            jack_time_t slack = frames_to_us((fOSSMaxBlock * 3) / 2, fEngineControl->fSampleRate);
             if (fOSSReadSync > fOSSWriteSync + slack) {
                 // Write silence to delay write sync, bring it closer to read sync.
                 jack_nframes_t fill = us_to_samples(fOSSReadSync - fOSSWriteSync, fEngineControl->fSampleRate);
