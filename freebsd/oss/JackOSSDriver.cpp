@@ -468,7 +468,7 @@ int JackOSSDriver::WaitAndSync()
                     // Account for some speed drift, but otherwise round down to earlier interval.
                     jack_time_t interval = frames_to_us(fInBlockSize, fEngineControl->fSampleRate);
                     jack_time_t remainder = fOSSReadSync % interval;
-                    jack_time_t max_drift = interval / 8;
+                    jack_time_t max_drift = interval / 4;
                     jack_time_t rounded = round_down((now - remainder) + max_drift, interval) + remainder;
                     //! \todo Streamline debug output.
                     if (rounded < fOSSReadSync) {
@@ -503,7 +503,7 @@ int JackOSSDriver::WaitAndSync()
                     // Account for some speed drift, but otherwise round down to earlier interval.
                     jack_time_t interval = frames_to_us(fOutBlockSize, fEngineControl->fSampleRate);
                     jack_time_t remainder = fOSSWriteSync % interval;
-                    jack_time_t max_drift = interval / 8;
+                    jack_time_t max_drift = interval / 4;
                     jack_time_t rounded = round_down((now - remainder) + max_drift, interval) + remainder;
                     //! \todo Streamline debug output.
                     if (rounded < fOSSWriteSync) {
