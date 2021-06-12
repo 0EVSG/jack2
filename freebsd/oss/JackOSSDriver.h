@@ -73,6 +73,10 @@ class JackOSSDriver : public JackAudioDriver
         jack_time_t fOSSWriteSync;
         long long fOSSWriteOffset;
 
+        // Buffer balance and sync correction
+        long long fBufferBalance;
+        bool fForceBalancing;
+
         int OpenInput();
         int OpenOutput();
         int OpenAux();
@@ -93,7 +97,8 @@ class JackOSSDriver : public JackAudioDriver
                 fInputBufferSize(0), fOutputBufferSize(0),
                 fInputBuffer(NULL), fOutputBuffer(NULL),
                 fInBlockSize(1), fOutBlockSize(1), fOSSMaxBlock(0), fOSSInBuffer(0), fOSSOutBuffer(0),
-                fOSSReadSync(0), fOSSReadOffset(0), fOSSWriteSync(0), fOSSWriteOffset(0)
+                fOSSReadSync(0), fOSSReadOffset(0), fOSSWriteSync(0), fOSSWriteOffset(0),
+                fBufferBalance(0), fForceBalancing(false)
         {}
 
         virtual ~JackOSSDriver()

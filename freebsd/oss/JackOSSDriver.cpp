@@ -531,6 +531,27 @@ int JackOSSDriver::WaitAndSync()
             poll_fd[1].events = 0;
         }
     }
+    // Compute balance of read and write buffers combined.
+    fBufferBalance = 0;
+    if (fInFD > 0 && fOutFD > 0) {
+        if (fOSSReadSync > fOSSWriteSync) {
+            long long fill = us_to_samples(fOSSReadSync - fOSSWriteSync, fEngineControl->fSampleRate);
+            fBufferBalance += fill;
+        }
+        if (fOSSWriteSync > fOSSReadSync) {
+            long long omit = us_to_samples(fOSSWriteSync - fOSSReadSync, fEngineControl->fSampleRate);
+            fBufferBalance -= omit;
+        }
+        fBufferBalance -= (fOSSWriteOffset - fOSSReadOffset);
+        fBufferBalance += ((1 + fNperiods) * fEngineControl->fBufferSize);
+
+        // Force balancing if sync times deviate too much.
+        jack_time_t slack = frames_to_us((fOSSMaxBlock * 3) / 2, fEngineControl->fSampleRate);
+        fForceBalancing = fForceBalancing || (fOSSReadSync > fOSSWriteSync + slack);
+        fForceBalancing = fForceBalancing || (fOSSWriteSync > fOSSReadSync + slack);
+        // Force balancing if buffer is badly balanced.
+        fForceBalancing = fForceBalancing || (abs(fBufferBalance) > (fOSSMaxBlock * 3) / 2);
+    }
     return 0;
 }
 
@@ -916,6 +937,8 @@ int JackOSSDriver::Read()
                 silence -= (fOutBlockSize / 2);
             }
             WriteSilence(silence);
+
+            fForceBalancing = true;
         }
     }
 
@@ -1029,27 +1052,12 @@ int JackOSSDriver::Write()
     if (fOSSWriteSync > 0) {
         jack_time_t now = GetMicroSeconds();
         long long progress = fEngineControl->fBufferSize;
-        if (fInFD > 0) {
-            //! \todo Also check that sync differenc does not exceed half a period.
-            jack_time_t slack = frames_to_us((fOSSMaxBlock * 3) / 2, fEngineControl->fSampleRate);
-            if (fOSSReadSync > fOSSWriteSync + slack) {
-                // Write silence to delay write sync, bring it closer to read sync.
-                long long fill = us_to_samples(fOSSReadSync - fOSSWriteSync, fEngineControl->fSampleRate);
-                fill += (fNperiods * fEngineControl->fBufferSize) - (fOSSWriteOffset - fOSSReadOffset);
-                jack_info("JackOSSDriver::Write recording offset %ld sync %ld ago", fOSSReadOffset, now - fOSSReadSync);
-                jack_info("JackOSSDriver::Write playback offset %ld sync %ld ago", fOSSWriteOffset, now - fOSSWriteSync);
-                jack_info("JackOSSDriver::Write fill up %ld", fill);
-                progress += fill;
-            }
-            if (fOSSWriteSync > fOSSReadSync + slack) {
-                // Skip frames for earlier write sync, bring it closer to read sync.
-                long long omit = us_to_samples(fOSSWriteSync - fOSSReadSync, fEngineControl->fSampleRate);
-                omit += (fOSSWriteOffset - fOSSReadOffset) - (fNperiods * fEngineControl->fBufferSize);
-                jack_info("JackOSSDriver::Write recording offset %ld sync %ld ago", fOSSReadOffset, now - fOSSReadSync);
-                jack_info("JackOSSDriver::Write playback offset %ld sync %ld ago", fOSSWriteOffset, now - fOSSWriteSync);
-                jack_info("JackOSSDriver::Write skip %ld", omit);
-                progress -= omit;
-            }
+        if (fForceBalancing) {
+            fForceBalancing = false;
+            progress += fBufferBalance;
+            jack_info("JackOSSDriver::Write recording offset %ld sync %ld ago", fOSSReadOffset, now - fOSSReadSync);
+            jack_info("JackOSSDriver::Write playback offset %ld sync %ld ago", fOSSWriteOffset, now - fOSSWriteSync);
+            jack_info("JackOSSDriver::Write buffer balancing %ld", fBufferBalance);
         }
         long long passed = us_to_samples(now - fOSSWriteSync, fEngineControl->fSampleRate);
         long long consumed = passed - (passed % fOutBlockSize);
