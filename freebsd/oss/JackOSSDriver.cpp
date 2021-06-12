@@ -915,11 +915,10 @@ int JackOSSDriver::Read()
         return -1;
     }
 
-    //! \todo Always take cycle begin time here!
+    // Keep begin cycle time
+    JackDriver::CycleTakeBeginTime();
 
     if (fInFD < 0) {
-        // Keep begin cycle time
-        JackDriver::CycleTakeBeginTime();
         return 0;
     }
 
@@ -990,8 +989,6 @@ int JackOSSDriver::Read()
         return -1;
     } else {
 
-        // Keep begin cycle time
-        JackDriver::CycleTakeBeginTime();
         for (int i = 0; i < fCaptureChannels; i++) {
             if (fGraphManager->GetConnectionsNum(fCapturePortList[i]) > 0) {
                 CopyAndConvertIn(GetInputBuffer(i), fInputBuffer, fEngineControl->fBufferSize, i, fCaptureChannels, fBits);
