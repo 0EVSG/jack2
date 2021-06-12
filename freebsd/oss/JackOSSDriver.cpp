@@ -322,6 +322,13 @@ int JackOSSDriver::ProbeInBlockSize()
             }
         }
 
+        jack_info("JackOSSDriver::ProbeInBlockSize hardware block size %d", fInBlockSize);
+        jack_info("JackOSSDriver::ProbeInBlockSize max block size %d", fOSSMaxBlock);
+        if (fInBlockSize > fEngineControl->fBufferSize / 2) {
+            jack_info("JackOSSDriver::ProbeInBlockSize less than two hardware blocks per cycle");
+            jack_info("JackOSSDriver::ProbeInBlockSize for best results make period a multiple of %d", fInBlockSize);
+        }
+
         // Stop recording to reset the recording buffer.
         int trigger = 0;
         ioctl(fInFD, SNDCTL_DSP_SETTRIGGER, &trigger);
@@ -371,8 +378,13 @@ int JackOSSDriver::ProbeOutBlockSize()
                 fOutBlockSize = 1;
             }
         }
+
         jack_info("JackOSSDriver::ProbeOutBlockSize hardware block size %d", fOutBlockSize);
         jack_info("JackOSSDriver::ProbeOutBlockSize max block size %d", fOutMaxBlock);
+        if (fOutBlockSize > fEngineControl->fBufferSize / 2) {
+            jack_info("JackOSSDriver::ProbeOutBlockSize less than two hardware blocks per cycle");
+            jack_info("JackOSSDriver::ProbeOutBlockSize for best results make period a multiple of %d", fOutBlockSize);
+        }
 
         // Stop recording to reset the recording buffer.
         int trigger = 0;
@@ -985,6 +997,7 @@ int JackOSSDriver::Read()
         jack_log("JackOSSDriver::Read error = %s", strerror(errno));
         return -1;
     } else if (count < (int)fInputBufferSize) {
+        //! \todo Try multiple times?
         jack_error("JackOSSDriver::Read error bytes read = %ld", count);
         return -1;
     } else {
