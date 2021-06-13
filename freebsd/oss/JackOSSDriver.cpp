@@ -983,6 +983,7 @@ int JackOSSDriver::Read()
     }
     static unsigned int cycle_count = 0;
     if (++cycle_count % 1000 == 0) {
+        jack_info("JackOSSDriver::Read buffer balance is %ld", fBufferBalance);
         oss_count_t ptr;
         if (ioctl(fInFD, SNDCTL_DSP_CURRENT_IPTR, &ptr) != -1) {
             jack_info("JackOSSDriver::Read recording samples = %ld, fifo_samples = %d", ptr.samples, ptr.fifo_samples);
