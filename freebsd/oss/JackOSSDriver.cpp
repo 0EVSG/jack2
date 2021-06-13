@@ -53,23 +53,6 @@ inline jack_nframes_t round_up(jack_nframes_t frames, jack_nframes_t block) {
     return frames;
 }
 
-inline jack_nframes_t round_to(jack_nframes_t frames, jack_nframes_t block)
-{
-    if (block > 0) {
-        frames += (block / 2);
-        frames -= (frames % block);
-    }
-    return frames;
-}
-
-inline jack_time_t round(jack_time_t time, jack_time_t interval) {
-    if (interval > 0) {
-        time += (interval / 2);
-        time -= (time % interval);
-    }
-    return time;
-}
-
 inline jack_time_t round_down(jack_time_t time, jack_time_t interval) {
     if (interval > 0) {
         time -= (time % interval);
