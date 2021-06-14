@@ -60,6 +60,40 @@ inline jack_time_t round_down(jack_time_t time, jack_time_t interval) {
     return time;
 }
 
+int get_sample_format(int bits)
+{
+    switch(bits) {
+        // Native-endian signed 32 bit samples.
+        case 32:
+            return AFMT_S32_NE;
+        // Native-endian signed 24 bit (packed) samples.
+        case 24:
+            return AFMT_S24_NE;
+        // Native-endian signed 16 bit samples, used by default.
+        case 16:
+        default:
+            return AFMT_S16_NE;
+    }
+}
+
+unsigned int get_sample_size(int format)
+{
+    switch(format) {
+        // Native-endian signed 32 bit samples.
+        case AFMT_S32_NE:
+            return 4;
+        // Native-endian signed 24 bit (packed) samples.
+        case AFMT_S24_NE:
+            return 3;
+        // Native-endian signed 16 bit samples.
+        case AFMT_S16_NE:
+            return 2;
+        // Unsupported sample format.
+        default:
+            return 0;
+    }
+}
+
 }
 
 namespace Jack
@@ -145,26 +179,6 @@ static inline void CopyAndConvertOut(void *dst, jack_sample_t *src, size_t nfram
 	}
 }
 
-void JackOSSDriver::SetSampleFormat()
-{
-    switch (fBits) {
-
-	    case 24:	/* native-endian LSB aligned 24-bits in 32-bits integer */
-            fSampleFormat = AFMT_S24_NE;
-            fSampleSize = 3;
-			break;
-		case 32:	/* native-endian 32-bit integer */
-            fSampleFormat = AFMT_S32_NE;
-            fSampleSize = sizeof(int);
-			break;
-		case 16:	/* native-endian 16-bit integer */
-		default:
-            fSampleFormat = AFMT_S16_NE;
-            fSampleSize = sizeof(short);
-			break;
-    }
-}
-
 void JackOSSDriver::DisplayDeviceInfo()
 {
     audio_buf_info info;
@@ -174,7 +188,7 @@ void JackOSSDriver::DisplayDeviceInfo()
 
     // Duplex cards : http://manuals.opensound.com/developer/full_duplex.html
     jack_info("Audio Interface Description :");
-    jack_info("Sampling Frequency : %d, Sample Format : %d", fEngineControl->fSampleRate, fSampleFormat);
+    jack_info("Sampling Frequency : %d, Sample Size : %d", fEngineControl->fSampleRate, fInSampleSize * 8);
 
     if (fPlayback) {
 
@@ -262,7 +276,7 @@ int JackOSSDriver::ProbeInBlockSize()
     if (fInFD > 0) {
         // Read one frame into a new hardware block so we can check its size.
         // Repeat that for multiple probes, sometimes the first reads differ.
-        ssize_t bytes = 1 * fSampleSize * fCaptureChannels;
+        ssize_t bytes = 1 * fInSampleSize * fCaptureChannels;
         jack_nframes_t probes[8] = {0, 0, 0, 0, 0, 0, 0, 0};
         for (int p = 0; p < 8 && bytes > 0; ++p) {
             ssize_t count = ::read(fInFD, fInputBuffer, bytes);
@@ -278,7 +292,7 @@ int JackOSSDriver::ProbeInBlockSize()
                     probes[p] = 1U + ptr.fifo_samples;
                     if (probes[p] <= fEngineControl->fBufferSize) {
                         // Proceed by reading one frame into the next hardware block.
-                        bytes = probes[p] * fSampleSize * fCaptureChannels;
+                        bytes = probes[p] * fInSampleSize * fCaptureChannels;
                     } else {
                         // Hardware block size is more than a period, irregular cycle timing.
                         //! \todo Issue a warning here instead of info.
@@ -387,7 +401,7 @@ int JackOSSDriver::WriteSilence(jack_nframes_t frames)
 
     // Prefill OSS playback buffer, write some periods of silence.
     memset(fOutputBuffer, 0, fOutputBufferSize);
-    unsigned int size = frames * fSampleSize * fPlaybackChannels;
+    unsigned int size = frames * fOutSampleSize * fPlaybackChannels;
     while (size > 0) {
         ssize_t chunk = (size > fOutputBufferSize) ? fOutputBufferSize : size;
         ssize_t count = ::write(fOutFD, fOutputBuffer, chunk);
@@ -395,7 +409,7 @@ int JackOSSDriver::WriteSilence(jack_nframes_t frames)
             jack_error("JackOSSDriver::WriteSilence error bytes written = %ld", count);
             return -1;
         }
-        fOSSWriteOffset += (count / (fSampleSize * fPlaybackChannels));
+        fOSSWriteOffset += (count / (fOutSampleSize * fPlaybackChannels));
         size -= count;
     }
     return 0;
@@ -564,14 +578,19 @@ int JackOSSDriver::OpenInput()
         }
     }
 
-    cur_sample_format = fSampleFormat;
-    if (ioctl(fInFD, SNDCTL_DSP_SETFMT, &fSampleFormat) == -1) {
+    cur_sample_format = get_sample_format(fBits);
+    if (ioctl(fInFD, SNDCTL_DSP_SETFMT, &cur_sample_format) == -1) {
         jack_error("JackOSSDriver::OpenInput failed to set format : %s@%i, errno = %d", __FILE__, __LINE__, errno);
         goto error;
     }
-    if (cur_sample_format != fSampleFormat) {
-        //! \todo Actually change sample format and size.
-        jack_info("JackOSSDriver::OpenInput driver forced the sample format %ld", fSampleFormat);
+    fInSampleSize = get_sample_size(cur_sample_format);
+    if (cur_sample_format != get_sample_format(fBits)) {
+        if (fInSampleSize > 0) {
+            jack_info("JackOSSDriver::OpenInput driver forced %d bit sample format", fInSampleSize * 8);
+        } else {
+            jack_error("JackOSSDriver::OpenInput unsupported sample format %#x", cur_sample_format);
+            goto error;
+        }
     }
 
     cur_capture_channels = fCaptureChannels;
@@ -593,7 +612,7 @@ int JackOSSDriver::OpenInput()
     }
 
     // Internal buffer size required for one period.
-    fInputBufferSize = fEngineControl->fBufferSize * fSampleSize * fCaptureChannels;
+    fInputBufferSize = fEngineControl->fBufferSize * fInSampleSize * fCaptureChannels;
 
     // Get the total size of the OSS recording buffer, in sample frames.
     info = {0, 0, 0, 0};
@@ -601,7 +620,7 @@ int JackOSSDriver::OpenInput()
         jack_error("JackOSSDriver::OpenInput failed to get buffer info : %s@%i, errno = %d", __FILE__, __LINE__, errno);
         goto error;
     }
-    fOSSInBuffer = info.fragstotal * info.fragsize / (fSampleSize * fCaptureChannels);
+    fOSSInBuffer = info.fragstotal * info.fragsize / (fInSampleSize * fCaptureChannels);
 
     if (fOSSInBuffer < fEngineControl->fBufferSize * (1 + fNperiods)) {
         // Total size of the OSS recording buffer is too small, resize it.
@@ -621,7 +640,7 @@ int JackOSSDriver::OpenInput()
             jack_error("JackOSSDriver::OpenInput failed to get buffer info : %s@%i, errno = %d", __FILE__, __LINE__, errno);
             goto error;
         }
-        fOSSInBuffer = info.fragstotal * info.fragsize / (fSampleSize * fCaptureChannels);
+        fOSSInBuffer = info.fragstotal * info.fragsize / (fInSampleSize * fCaptureChannels);
     }
 
     if (fOSSInBuffer > fEngineControl->fBufferSize) {
@@ -672,14 +691,19 @@ int JackOSSDriver::OpenOutput()
         }
     }
 
-    cur_sample_format = fSampleFormat;
-    if (ioctl(fOutFD, SNDCTL_DSP_SETFMT, &fSampleFormat) == -1) {
+    cur_sample_format = get_sample_format(fBits);
+    if (ioctl(fOutFD, SNDCTL_DSP_SETFMT, &cur_sample_format) == -1) {
         jack_error("JackOSSDriver::OpenOutput failed to set format : %s@%i, errno = %d", __FILE__, __LINE__, errno);
         goto error;
     }
-    if (cur_sample_format != fSampleFormat) {
-        //! \todo Actually change sample format and size.
-        jack_info("JackOSSDriver::OpenOutput driver forced the sample format %ld", fSampleFormat);
+    fOutSampleSize = get_sample_size(cur_sample_format);
+    if (cur_sample_format != get_sample_format(fBits)) {
+        if (fOutSampleSize > 0) {
+            jack_info("JackOSSDriver::OpenOutput driver forced %d bit sample format", fOutSampleSize * 8);
+        } else {
+            jack_error("JackOSSDriver::OpenOutput unsupported sample format %#x", cur_sample_format);
+            goto error;
+        }
     }
 
     cur_playback_channels = fPlaybackChannels;
@@ -701,7 +725,7 @@ int JackOSSDriver::OpenOutput()
     }
 
     // Internal buffer size required for one period.
-    fOutputBufferSize = fEngineControl->fBufferSize * fSampleSize * fPlaybackChannels;
+    fOutputBufferSize = fEngineControl->fBufferSize * fOutSampleSize * fPlaybackChannels;
 
     // Get the total size of the OSS playback buffer, in sample frames.
     info = {0, 0, 0, 0};
@@ -709,7 +733,7 @@ int JackOSSDriver::OpenOutput()
         jack_error("JackOSSDriver::OpenOutput failed to get buffer info : %s@%i, errno = %d", __FILE__, __LINE__, errno);
         goto error;
     }
-    fOSSOutBuffer = info.fragstotal * info.fragsize / (fSampleSize * fPlaybackChannels);
+    fOSSOutBuffer = info.fragstotal * info.fragsize / (fOutSampleSize * fPlaybackChannels);
 
     if (fOSSOutBuffer < fEngineControl->fBufferSize * (1 + fNperiods)) {
         // Total size of the OSS playback buffer is too small, resize it.
@@ -730,12 +754,12 @@ int JackOSSDriver::OpenOutput()
             jack_error("JackOSSDriver::OpenOutput failed to get buffer info : %s@%i, errno = %d", __FILE__, __LINE__, errno);
             goto error;
         }
-        fOSSOutBuffer = info.fragstotal * info.fragsize / (fSampleSize * fPlaybackChannels);
+        fOSSOutBuffer = info.fragstotal * info.fragsize / (fOutSampleSize * fPlaybackChannels);
     }
 
     if (fOSSOutBuffer > fEngineControl->fBufferSize * fNperiods) {
         jack_nframes_t low = fOSSOutBuffer - (fNperiods * fEngineControl->fBufferSize);
-        int mark = low * fSampleSize * fPlaybackChannels;
+        int mark = low * fOutSampleSize * fPlaybackChannels;
         if (ioctl(fOutFD, SNDCTL_DSP_LOW_WATER, &mark) != 0) {
             jack_error("JackOSSDriver::OpenOutput failed to set low water mark : %s@%i, errno = %d", __FILE__, __LINE__, errno);
             goto error;
@@ -861,8 +885,6 @@ int JackOSSDriver::Close()
 
 int JackOSSDriver::OpenAux()
 {
-    SetSampleFormat();
-
     if (fCapture && (OpenInput() < 0)) {
         return -1;
     }
@@ -905,10 +927,10 @@ int JackOSSDriver::Read()
         fOSSReadSync = GetMicroSeconds();
         fOSSReadOffset = 0;
         if (fInBlockSize > 1) {
-            ssize_t discard = (fInBlockSize / 2) * fSampleSize * fCaptureChannels;
+            ssize_t discard = (fInBlockSize / 2) * fInSampleSize * fCaptureChannels;
             discard = ::read(fInFD, fInputBuffer, discard);
             if (discard > 0) {
-                fOSSReadOffset += discard / (fSampleSize * fCaptureChannels);
+                fOSSReadOffset += discard / (fInSampleSize * fCaptureChannels);
             }
         }
         // In duplex mode, start playback right after recording with some silence.
@@ -957,12 +979,12 @@ int JackOSSDriver::Read()
             fOSSReadOffset += missed;
             fOSSWriteOffset += missed;
         }
-        fOSSReadOffset += count / (fSampleSize * fCaptureChannels);
+        fOSSReadOffset += count / (fInSampleSize * fCaptureChannels);
     }
 
     static unsigned int sample_count = 0;
     if (count > 0) {
-        sample_count += count / (fSampleSize * fCaptureChannels);
+        sample_count += count / (fInSampleSize * fCaptureChannels);
     }
     static unsigned int cycle_count = 0;
     if (++cycle_count % 1000 == 0) {
@@ -982,7 +1004,7 @@ int JackOSSDriver::Read()
 
 #ifdef JACK_MONITOR
     if (count > 0 && count != (int)fInputBufferSize)
-        jack_log("JackOSSDriver::Read count = %ld", count / (fSampleSize * fCaptureChannels));
+        jack_log("JackOSSDriver::Read count = %ld", count / (fInSampleSize * fCaptureChannels));
     gCycleTable.fTable[gCycleCount].fAfterRead = GetMicroSeconds();
 #endif
 
@@ -1012,7 +1034,7 @@ int JackOSSDriver::Read()
 
         for (int i = 0; i < fCaptureChannels; i++) {
             if (fGraphManager->GetConnectionsNum(fCapturePortList[i]) > 0) {
-                CopyAndConvertIn(GetInputBuffer(i), fInputBuffer, fEngineControl->fBufferSize, i, fCaptureChannels, fBits);
+                CopyAndConvertIn(GetInputBuffer(i), fInputBuffer, fEngineControl->fBufferSize, i, fCaptureChannels, fInSampleSize * 8);
             }
         }
 
@@ -1063,7 +1085,7 @@ int JackOSSDriver::Write()
             skip += fOutputBufferSize;
             fOSSWriteOffset += progress;
         } else if (write_length < fEngineControl->fBufferSize) {
-            skip += (fEngineControl->fBufferSize - write_length) * fSampleSize * fPlaybackChannels;
+            skip += (fEngineControl->fBufferSize - write_length) * fOutSampleSize * fPlaybackChannels;
             fOSSWriteOffset += overdue;
         }
     }
@@ -1075,7 +1097,7 @@ int JackOSSDriver::Write()
     memset(fOutputBuffer, 0, fOutputBufferSize);
     for (int i = 0; i < fPlaybackChannels; i++) {
         if (fGraphManager->GetConnectionsNum(fPlaybackPortList[i]) > 0) {
-            CopyAndConvertOut(fOutputBuffer, GetOutputBuffer(i), fEngineControl->fBufferSize, i, fPlaybackChannels, fBits);
+            CopyAndConvertOut(fOutputBuffer, GetOutputBuffer(i), fEngineControl->fBufferSize, i, fPlaybackChannels, fOutSampleSize * 8);
         }
     }
 
@@ -1091,19 +1113,19 @@ int JackOSSDriver::Write()
     }
 
     if (count > 0) {
-        fOSSWriteOffset += (count / (fSampleSize * fPlaybackChannels));
+        fOSSWriteOffset += (count / (fOutSampleSize * fPlaybackChannels));
     }
 
   #ifdef JACK_MONITOR
     if (count > 0 && count != (int)(fOutputBufferSize - skip))
-        jack_log("JackOSSDriver::Write count = %ld", count / (fSampleSize * fPlaybackChannels));
+        jack_log("JackOSSDriver::Write count = %ld", count / (fOutSampleSize * fPlaybackChannels));
     gCycleTable.fTable[gCycleCount].fAfterWrite = GetMicroSeconds();
     gCycleCount = (gCycleCount == CYCLE_POINTS - 1) ? gCycleCount: gCycleCount + 1;
   #endif
 
     static unsigned int sample_count = 0;
     if (count > 0) {
-        sample_count += count / (fSampleSize * fPlaybackChannels);
+        sample_count += count / (fOutSampleSize * fPlaybackChannels);
     }
     static unsigned int cycle_count = 0;
     if (++cycle_count % 1000 == 0) {

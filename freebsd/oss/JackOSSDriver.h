@@ -48,13 +48,14 @@ class JackOSSDriver : public JackAudioDriver
         int fOutFD;
 
         int fBits;
-        int fSampleFormat;
         int fNperiods;
-        unsigned int fSampleSize;
         bool fCapture;
         bool fPlayback;
         bool fExcl;
         bool fIgnoreHW;
+
+        unsigned int fInSampleSize;
+        unsigned int fOutSampleSize;
 
         unsigned int fInputBufferSize;
         unsigned int fOutputBufferSize;
@@ -81,7 +82,6 @@ class JackOSSDriver : public JackAudioDriver
         int OpenOutput();
         int OpenAux();
         void CloseAux();
-        void SetSampleFormat();
         void DisplayDeviceInfo();
         int ProbeInBlockSize();
         int ProbeOutBlockSize();
@@ -93,7 +93,8 @@ class JackOSSDriver : public JackAudioDriver
         JackOSSDriver(const char* name, const char* alias, JackLockedEngine* engine, JackSynchro* table)
                 : JackAudioDriver(name, alias, engine, table),
                 fInFD(-1), fOutFD(-1), fBits(0),
-                fSampleFormat(0), fNperiods(0), fCapture(false), fPlayback(false), fExcl(false), fIgnoreHW(true),
+                fNperiods(0), fCapture(false), fPlayback(false), fExcl(false), fIgnoreHW(true),
+                fInSampleSize(0), fOutSampleSize(0),
                 fInputBufferSize(0), fOutputBufferSize(0),
                 fInputBuffer(NULL), fOutputBuffer(NULL),
                 fInBlockSize(1), fOutBlockSize(1), fOSSMaxBlock(0), fOSSInBuffer(0), fOSSOutBuffer(0),
