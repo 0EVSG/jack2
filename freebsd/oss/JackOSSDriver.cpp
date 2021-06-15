@@ -273,124 +273,150 @@ void JackOSSDriver::DisplayDeviceInfo()
 
 int JackOSSDriver::ProbeInBlockSize()
 {
+    jack_nframes_t blocks[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+    int probes = 0;
+    int ret = 0;
+    // Default values in case of an error.
+    fInMeanStep = fEngineControl->fBufferSize;
+    fInBlockSize = 1;
+
     if (fInFD > 0) {
         // Read one frame into a new hardware block so we can check its size.
         // Repeat that for multiple probes, sometimes the first reads differ.
         ssize_t bytes = 1 * fInSampleSize * fCaptureChannels;
-        jack_nframes_t probes[8] = {0, 0, 0, 0, 0, 0, 0, 0};
         for (int p = 0; p < 8 && bytes > 0; ++p) {
             ssize_t count = ::read(fInFD, fInputBuffer, bytes);
             if (count < 0) {
-                // Read error - try again.
-                continue;
+                // Read error - abort.
+                jack_error("JackOSSDriver::ProbeInBlockSize read failed with %d", ret);
+                ret = count;
+                break;
             }
             bytes -= count;
             if (bytes == 0) {
-                // Successfully read one frame into a new hardware block.
                 oss_count_t ptr;
                 if (ioctl(fInFD, SNDCTL_DSP_CURRENT_IPTR, &ptr) == 0 && ptr.fifo_samples > 0) {
-                    probes[p] = 1U + ptr.fifo_samples;
-                    if (probes[p] <= fEngineControl->fBufferSize) {
-                        // Proceed by reading one frame into the next hardware block.
-                        bytes = probes[p] * fInSampleSize * fCaptureChannels;
-                    } else {
-                        // Hardware block size is more than a period, irregular cycle timing.
-                        //! \todo Issue a warning here instead of info.
-                        jack_info("JackOSSDriver::ProbeInBlockSize hardware block size %d > period", probes[p]);
-                    }
+                    // Success, store probed hardware block size for later.
+                    blocks[p] = 1U + ptr.fifo_samples;
+                    ++probes;
+                    // Proceed by reading one frame into the next hardware block.
+                    bytes = blocks[p] * fInSampleSize * fCaptureChannels;
                 }
             }
-        }
-
-        // Examine probes of hardware block size.
-        fOSSMaxBlock = 1;
-        for (int p = 0; p < 8; ++p) {
-            jack_info("JackOSSDriver::ProbeInBlockSize hardware block of %d", probes[p]);
-            if (probes[p] > fOSSMaxBlock) {
-                fOSSMaxBlock = probes[p];
-            }
-        }
-
-        // Assume regular hardware block size if the last four probes are the same.
-        fInBlockSize = 1;
-        if (probes[7] > 0) {
-            if (probes[4] == probes[5] && probes[5] == probes[6] && probes[6] == probes[7]) {
-                fInBlockSize = probes[7];
-            }
-        }
-
-        jack_info("JackOSSDriver::ProbeInBlockSize hardware block size %d", fInBlockSize);
-        jack_info("JackOSSDriver::ProbeInBlockSize max block size %d", fOSSMaxBlock);
-        if (fInBlockSize > fEngineControl->fBufferSize / 2) {
-            jack_info("JackOSSDriver::ProbeInBlockSize less than two hardware blocks per cycle");
-            jack_info("JackOSSDriver::ProbeInBlockSize for best results make period a multiple of %d", fInBlockSize);
         }
 
         // Stop recording to reset the recording buffer.
         int trigger = 0;
         ioctl(fInFD, SNDCTL_DSP_SETTRIGGER, &trigger);
-        return 0;
     }
 
-    // Default values in case of an error.
-    fOSSMaxBlock = fEngineControl->fBufferSize;
-    fInBlockSize = 1;
-    return -1;
+    if (probes == 8) {
+        // Compute mean block size of the last six probes.
+        jack_nframes_t sum = 0;
+        for (int p = 2; p < 8; ++p) {
+            jack_info("JackOSSDriver::ProbeInBlockSize read hardware block of %d", blocks[p]);
+            sum += blocks[p];
+        }
+        fInMeanStep = sum / 6;
+
+        // Check that none of the probed block sizes deviates too much.
+        jack_nframes_t slack = fInMeanStep / 16;
+        bool strict = true;
+        for (int p = 2; p < 8; ++p) {
+            strict = strict && (blocks[p] > fInMeanStep - slack) && (blocks[p] < fInMeanStep + slack);
+        }
+
+        if (strict && fInMeanStep <= fEngineControl->fBufferSize) {
+            // Regular hardware block size, use it for rounding.
+            jack_info("JackOSSDriver::ProbeInBlockSize hardware blocks are %d frames", fInMeanStep);
+            fInBlockSize = fInMeanStep;
+        } else {
+            jack_info("JackOSSDriver::ProbeInBlockSize irregular hardware block sizes");
+            jack_info("JackOSSDriver::ProbeInBlockSize mean hardware block was %d frames", fInMeanStep);
+        }
+
+        if (fInBlockSize > fEngineControl->fBufferSize / 2) {
+            jack_info("JackOSSDriver::ProbeInBlockSize less than two hardware blocks per cycle");
+            jack_info("JackOSSDriver::ProbeInBlockSize for best results make period a multiple of %d", fInBlockSize);
+        }
+    }
+
+    return ret;
 }
 
 int JackOSSDriver::ProbeOutBlockSize()
 {
+    jack_nframes_t blocks[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+    int probes = 0;
+    int ret = 0;
+    // Default values in case of an error.
+    fOutMeanStep = fEngineControl->fBufferSize;
+    fOutBlockSize = 1;
+
     if (fOutFD) {
-        int ret = 0;
-        jack_nframes_t mark = (fNperiods * fEngineControl->fBufferSize) + 1;
-        WriteSilence(mark);
-        jack_nframes_t probes[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+        // Write one frame over the low water mark, then check the consumed block size.
+        // Repeat that for multiple probes, sometimes the initial ones differ.
+        jack_nframes_t mark = fNperiods * fEngineControl->fBufferSize;
+        WriteSilence(mark + 1);
         for (int p = 0; p < 8 && ret >= 0; ++p) {
             pollfd poll_fd;
             poll_fd.fd = fOutFD;
             poll_fd.events = POLLOUT;
             ret = poll(&poll_fd, 1, 500);
-            if (ret <= 0) {
+            if (ret < 0) {
                 jack_error("JackOSSDriver::ProbeOutBlockSize poll failed with %d", ret);
+                break;
             }
             if (poll_fd.revents & POLLOUT) {
                 oss_count_t ptr;
                 if (ioctl(fOutFD, SNDCTL_DSP_CURRENT_OPTR, &ptr) != -1 && ptr.fifo_samples >= 0) {
-                    probes[p] = mark - ptr.fifo_samples;
-                    WriteSilence(probes[p]);
+                    // Success, store probed hardware block size for later.
+                    blocks[p] = mark + 1 - ptr.fifo_samples;
+                    ++probes;
+                    // Proceed by writing one frame over the low water mark.
+                    WriteSilence(blocks[p]);
                 }
                 poll_fd.revents = 0;
             }
         }
 
-        // Examine probes of hardware block size.
-        jack_nframes_t fOutMaxBlock = 1;
-        fOutBlockSize = probes[3];
-        for (int p = 4; p < 8; ++p) {
-            jack_info("JackOSSDriver::ProbeOutBlockSize hardware block of %d", probes[p]);
-            if (probes[p] > fOutMaxBlock) {
-                fOutMaxBlock = probes[p];
-            }
-            if (probes[p] != fOutBlockSize) {
-                fOutBlockSize = 1;
-            }
+        // Stop playback to reset the playback buffer.
+        int trigger = 0;
+        ioctl(fOutFD, SNDCTL_DSP_SETTRIGGER, &trigger);
+    }
+
+    if (probes == 8) {
+        // Compute mean and maximum block size of the last six probes.
+        jack_nframes_t sum = 0;
+        for (int p = 2; p < 8; ++p) {
+            jack_info("JackOSSDriver::ProbeOutBlockSize write hardware block of %d", blocks[p]);
+            sum += blocks[p];
+        }
+        fOutMeanStep = sum / 6;
+
+        // Check that none of the probed block sizes deviates too much.
+        jack_nframes_t slack = fOutMeanStep / 16;
+        bool strict = true;
+        for (int p = 2; p < 8; ++p) {
+            strict = strict && (blocks[p] > fOutMeanStep - slack) && (blocks[p] < fOutMeanStep + slack);
         }
 
-        jack_info("JackOSSDriver::ProbeOutBlockSize hardware block size %d", fOutBlockSize);
-        jack_info("JackOSSDriver::ProbeOutBlockSize max block size %d", fOutMaxBlock);
+        if (strict && fOutMeanStep <= fEngineControl->fBufferSize) {
+            // Regular hardware block size, use it for rounding.
+            jack_info("JackOSSDriver::ProbeOutBlockSize hardware blocks are %d frames", fOutMeanStep);
+            fOutBlockSize = fOutMeanStep;
+        } else {
+            jack_info("JackOSSDriver::ProbeOutBlockSize irregular hardware block sizes");
+            jack_info("JackOSSDriver::ProbeOutBlockSize mean hardware block was %d frames", fOutMeanStep);
+        }
+
         if (fOutBlockSize > fEngineControl->fBufferSize / 2) {
             jack_info("JackOSSDriver::ProbeOutBlockSize less than two hardware blocks per cycle");
             jack_info("JackOSSDriver::ProbeOutBlockSize for best results make period a multiple of %d", fOutBlockSize);
         }
-
-        // Stop recording to reset the recording buffer.
-        int trigger = 0;
-        ioctl(fOutFD, SNDCTL_DSP_SETTRIGGER, &trigger);
-        return 0;
     }
 
-    fOutBlockSize = 1;
-    return -1;
+    return ret;
 }
 
 int JackOSSDriver::WriteSilence(jack_nframes_t frames)
@@ -548,7 +574,7 @@ int JackOSSDriver::WaitAndSync()
         fForceBalancing = fForceBalancing || (fOSSReadSync > fOSSWriteSync + slack);
         fForceBalancing = fForceBalancing || (fOSSWriteSync > fOSSReadSync + slack);
         // Force balancing if buffer is badly balanced.
-        fForceBalancing = fForceBalancing || (abs(fBufferBalance) > (fOSSMaxBlock * 3) / 2);
+        fForceBalancing = fForceBalancing || (abs(fBufferBalance) > max(fInMeanStep, fOutMeanStep));
     }
     return 0;
 }
@@ -921,31 +947,25 @@ void JackOSSDriver::CloseAux()
 int JackOSSDriver::Read()
 {
     if (fInFD > 0 && fOSSReadSync == 0) {
-        // Start recording again for the following read.
-        int trigger = PCM_ENABLE_INPUT;
-        ioctl(fInFD, SNDCTL_DSP_SETTRIGGER, &trigger);
+        // First cycle, start capture by reading half into a hardware block.
         fOSSReadSync = GetMicroSeconds();
         fOSSReadOffset = 0;
-        if (fInBlockSize > 1) {
-            ssize_t discard = (fInBlockSize / 2) * fInSampleSize * fCaptureChannels;
-            discard = ::read(fInFD, fInputBuffer, discard);
-            if (discard > 0) {
-                fOSSReadOffset += discard / (fInSampleSize * fCaptureChannels);
-            }
+        ssize_t discard = (fInMeanStep / 2) * fInSampleSize * fCaptureChannels;
+        discard = ::read(fInFD, fInputBuffer, discard);
+        if (discard > 0) {
+            fOSSReadOffset += discard / (fInSampleSize * fCaptureChannels);
         }
-        // In duplex mode, start playback right after recording with some silence.
-        // Consistently results in a total of (1 + nperiod) * period frames in flight.
-        if (fOutFD > 0) {
-            fOSSWriteSync = GetMicroSeconds();
-            fOSSWriteOffset = 0;
-            jack_nframes_t silence = (fNperiods + 1) * fEngineControl->fBufferSize;
-            if (fOutBlockSize > 1) {
-                silence -= (fOutBlockSize / 2);
-            }
-            WriteSilence(silence);
+    }
 
-            fForceBalancing = true;
-        }
+    if (fOutFD > 0 && fOSSWriteSync == 0) {
+        // First cycle, start playback with some silence.
+        fOSSWriteSync = GetMicroSeconds();
+        fOSSWriteOffset = 0;
+        jack_nframes_t silence = (fNperiods + 1) * fEngineControl->fBufferSize;
+        silence -= (fOutMeanStep / 2);
+        WriteSilence(silence);
+
+        fForceBalancing = true;
     }
 
 #ifdef JACK_MONITOR
@@ -1068,7 +1088,7 @@ int JackOSSDriver::Write()
         }
         long long passed = us_to_samples(now - fOSSWriteSync, fEngineControl->fSampleRate);
         long long consumed = passed - (passed % fOutBlockSize);
-        long long tolerance = (fOutBlockSize > 1) ? 0 : fOSSMaxBlock;
+        long long tolerance = (fOutBlockSize > 1) ? 0 : fOutMeanStep;
         long long overdue = 0;
         if (consumed > fOSSWriteOffset + tolerance) {
             // Skip playback to avoid buffer accumulation through excessive input.
