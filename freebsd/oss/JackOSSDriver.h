@@ -65,7 +65,8 @@ class JackOSSDriver : public JackAudioDriver
 
         jack_nframes_t fInBlockSize;
         jack_nframes_t fOutBlockSize;
-        jack_nframes_t fOSSMaxBlock;
+        jack_nframes_t fInMeanStep;
+        jack_nframes_t fOutMeanStep;
         jack_nframes_t fOSSInBuffer;
         jack_nframes_t fOSSOutBuffer;
 
@@ -97,7 +98,9 @@ class JackOSSDriver : public JackAudioDriver
                 fInSampleSize(0), fOutSampleSize(0),
                 fInputBufferSize(0), fOutputBufferSize(0),
                 fInputBuffer(NULL), fOutputBuffer(NULL),
-                fInBlockSize(1), fOutBlockSize(1), fOSSMaxBlock(0), fOSSInBuffer(0), fOSSOutBuffer(0),
+                fInBlockSize(1), fOutBlockSize(1),
+                fInMeanStep(0), fOutMeanStep(0),
+                fOSSInBuffer(0), fOSSOutBuffer(0),
                 fOSSReadSync(0), fOSSReadOffset(0), fOSSWriteSync(0), fOSSWriteOffset(0),
                 fBufferBalance(0), fForceBalancing(false)
         {}
