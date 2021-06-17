@@ -955,6 +955,8 @@ int JackOSSDriver::Read()
 {
     if (fInFD > 0 && fOSSReadSync == 0) {
         // First cycle, start capture by reading half into a hardware block.
+        int trigger = PCM_ENABLE_INPUT;
+        ioctl(fInFD, SNDCTL_DSP_SETTRIGGER, &trigger);
         fOSSReadSync = GetMicroSeconds();
         fOSSReadOffset = 0;
         ssize_t discard = (fInMeanStep / 2) * fInSampleSize * fCaptureChannels;
@@ -971,6 +973,8 @@ int JackOSSDriver::Read()
         jack_nframes_t silence = (fNperiods + 1) * fEngineControl->fBufferSize;
         silence -= (fOutMeanStep / 2);
         WriteSilence(silence);
+        int trigger = PCM_ENABLE_OUTPUT;
+        ioctl(fOutFD, SNDCTL_DSP_SETTRIGGER, &trigger);
 
         fForceBalancing = true;
     }
