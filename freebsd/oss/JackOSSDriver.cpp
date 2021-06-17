@@ -502,6 +502,10 @@ int JackOSSDriver::WaitAndSync()
                     fOSSReadOffset = -ptr.fifo_samples;
                 } else if (ptr.fifo_samples - fEngineControl->fBufferSize >= fInBlockSize) {
                     // Too late for a reliable sync, discard.
+                } else if (fForceBalancing) {
+                    // First cycle, just use sync time directly.
+                    fOSSReadSync = now;
+                    fOSSReadOffset = -ptr.fifo_samples;
                 } else {
                     // Adapt expected sync time when early or late - in whole block intervals.
                     // Account for some speed drift, but otherwise round down to earlier interval.
@@ -536,6 +540,10 @@ int JackOSSDriver::WaitAndSync()
                     fOSSWriteOffset = ptr.fifo_samples;
                 } else if (ptr.fifo_samples + fOutBlockSize <= fNperiods * fEngineControl->fBufferSize) {
                     // Too late for a reliable sync, discard.
+                } else if (fForceBalancing) {
+                    // First cycle, just use sync time directly.
+                    fOSSWriteSync = now;
+                    fOSSWriteOffset = ptr.fifo_samples;
                 } else {
                     // Adapt expected sync time when early or late - in whole block intervals.
                     // Account for some speed drift, but otherwise round down to earlier interval.
