@@ -314,9 +314,8 @@ int JackOSSDriver::ProbeInBlockSize()
             }
         }
 
-        // Stop recording to reset the recording buffer.
-        int trigger = 0;
-        ioctl(fInFD, SNDCTL_DSP_SETTRIGGER, &trigger);
+        // Stop recording.
+        ioctl(fInFD, SNDCTL_DSP_HALT_INPUT, NULL);
     }
 
     if (probes == 8) {
@@ -389,9 +388,8 @@ int JackOSSDriver::ProbeOutBlockSize()
             }
         }
 
-        // Stop playback to reset the playback buffer.
-        int trigger = 0;
-        ioctl(fOutFD, SNDCTL_DSP_SETTRIGGER, &trigger);
+        // Stop playback.
+        ioctl(fOutFD, SNDCTL_DSP_HALT_INPUT, NULL);
     }
 
     if (probes == 8) {
@@ -501,7 +499,12 @@ int JackOSSDriver::WaitAndSync()
                     fOSSReadSync = min(fOSSReadSync, now) / 2 + now / 2;
                     fOSSReadOffset = -ptr.fifo_samples;
                 } else if (ptr.fifo_samples - fEngineControl->fBufferSize >= fInBlockSize) {
-                    // Too late for a reliable sync, discard.
+                    // Too late for a reliable sync, make sure sync time is not in the future.
+                    if (now < fOSSReadSync) {
+                        fOSSReadOffset = -ptr.fifo_samples;
+                        jack_info("JackOSSDriver::WaitAndSync capture %ld sync %ld early", fOSSReadOffset, fOSSReadSync - now);
+                        fOSSReadSync = now;
+                    }
                 } else if (fForceBalancing) {
                     // First cycle, just use sync time directly.
                     fOSSReadSync = now;
@@ -539,7 +542,12 @@ int JackOSSDriver::WaitAndSync()
                     fOSSWriteSync = min(fOSSWriteSync, now) / 2 + now / 2;
                     fOSSWriteOffset = ptr.fifo_samples;
                 } else if (ptr.fifo_samples + fOutBlockSize <= fNperiods * fEngineControl->fBufferSize) {
-                    // Too late for a reliable sync, discard.
+                    // Too late for a reliable sync, make sure sync time is not in the future.
+                    if (now < fOSSWriteSync) {
+                        fOSSWriteOffset = ptr.fifo_samples;
+                        jack_info("JackOSSDriver::WaitAndSync playback %ld sync %ld early", fOSSWriteOffset, fOSSWriteSync - now);
+                        fOSSWriteSync = now;
+                    }
                 } else if (fForceBalancing) {
                     // First cycle, just use sync time directly.
                     fOSSWriteSync = now;
@@ -962,27 +970,42 @@ void JackOSSDriver::CloseAux()
 int JackOSSDriver::Read()
 {
     if (fInFD > 0 && fOSSReadSync == 0) {
-        // First cycle, start capture by reading half into a hardware block.
-        int trigger = PCM_ENABLE_INPUT;
-        ioctl(fInFD, SNDCTL_DSP_SETTRIGGER, &trigger);
-        fOSSReadSync = GetMicroSeconds();
+        // Account for leftover samples from previous reads.
         fOSSReadOffset = 0;
-        ssize_t discard = (fInMeanStep / 2) * fInSampleSize * fCaptureChannels;
-        discard = ::read(fInFD, fInputBuffer, discard);
-        if (discard > 0) {
-            fOSSReadOffset += discard / (fInSampleSize * fCaptureChannels);
+        oss_count_t ptr;
+        if (ioctl(fInFD, SNDCTL_DSP_CURRENT_IPTR, &ptr) == 0 && ptr.fifo_samples > 0) {
+            jack_info("JackOSSDriver::Read pre recording samples = %ld, fifo_samples = %d", ptr.samples, ptr.fifo_samples);
+            fOSSReadOffset = -ptr.fifo_samples;
         }
+
+        // First cycle, start capture by reading halfway into a hardware block.
+        jack_nframes_t discard = (fInMeanStep / 2) - fOSSReadOffset;
+        jack_info("JackOSSDriver::Read start recording discard %ld frames", discard);
+        fOSSReadSync = GetMicroSeconds();
+        ssize_t count = ::read(fInFD, fInputBuffer, discard * fInSampleSize * fCaptureChannels);
+        if (count > 0) {
+            fOSSReadOffset += count / (fInSampleSize * fCaptureChannels);
+        }
+
+        fForceBalancing = true;
     }
 
     if (fOutFD > 0 && fOSSWriteSync == 0) {
-        // First cycle, start playback with some silence.
-        fOSSWriteSync = GetMicroSeconds();
+        // Account for leftover samples from previous writes.
         fOSSWriteOffset = 0;
+        oss_count_t ptr;
+        if (ioctl(fOutFD, SNDCTL_DSP_CURRENT_OPTR, &ptr) == 0 && ptr.fifo_samples > 0) {
+            jack_info("JackOSSDriver::Read pre playback samples = %ld, fifo_samples = %d", ptr.samples, ptr.fifo_samples);
+            fOSSWriteOffset = ptr.fifo_samples;
+        }
+
+        // First cycle, start playback with silence.
         jack_nframes_t silence = (fNperiods + 1) * fEngineControl->fBufferSize;
         silence -= (fOutMeanStep / 2);
+        silence = max(silence - fOSSWriteOffset, 1LL);
+        jack_info("JackOSSDriver::Read start playback with %ld frames of silence", silence);
+        fOSSWriteSync = GetMicroSeconds();
         WriteSilence(silence);
-        int trigger = PCM_ENABLE_OUTPUT;
-        ioctl(fOutFD, SNDCTL_DSP_SETTRIGGER, &trigger);
 
         fForceBalancing = true;
     }
@@ -1014,7 +1037,7 @@ int JackOSSDriver::Read()
         if (passed > fOSSReadOffset + fOSSInBuffer) {
             // Overrun, adjust read and write position.
             long long missed = passed - (fOSSReadOffset + fOSSInBuffer);
-            jack_error("JackOSSDriver::Read missed %d frames by overrun", missed);
+            jack_error("JackOSSDriver::Read missed %ld frames by overrun, passed=%ld, sync=%ld, now=%ld", missed, passed, fOSSReadSync, now);
             fOSSReadOffset += missed;
             fOSSWriteOffset += missed;
         }
