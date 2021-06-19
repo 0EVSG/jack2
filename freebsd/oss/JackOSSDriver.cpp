@@ -940,6 +940,17 @@ int JackOSSDriver::Close()
 
 int JackOSSDriver::OpenAux()
 {
+    // (Re-)Initialize runtime variables.
+    fInSampleSize = fOutSampleSize = 0;
+    fInputBufferSize = fOutputBufferSize = 0;
+    fInBlockSize = fOutBlockSize = 1;
+    fInMeanStep = fOutMeanStep = 0;
+    fOSSInBuffer = fOSSOutBuffer = 0;
+    fOSSReadSync = fOSSWriteSync = 0;
+    fOSSReadOffset = fOSSWriteOffset = 0;
+    fBufferBalance = 0;
+    fForceBalancing = false;
+
     if (fCapture && (OpenInput() < 0)) {
         return -1;
     }
