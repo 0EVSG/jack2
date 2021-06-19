@@ -567,16 +567,10 @@ int JackOSSDriver::WaitAndSync()
     // Compute balance of read and write buffers combined.
     fBufferBalance = 0;
     if (fInFD > 0 && fOutFD > 0) {
-        if (fOSSReadSync > fOSSWriteSync) {
-            long long fill = TimeToFrames(fOSSReadSync - fOSSWriteSync, fEngineControl->fSampleRate);
-            fBufferBalance += fill;
-        }
-        if (fOSSWriteSync > fOSSReadSync) {
-            long long omit = TimeToFrames(fOSSWriteSync - fOSSReadSync, fEngineControl->fSampleRate);
-            fBufferBalance -= omit;
-        }
-        fBufferBalance -= (fOSSWriteOffset - fOSSReadOffset);
+        // Compare actual buffer content with target of (1 + n) * period.
         fBufferBalance += ((1 + fNperiods) * fEngineControl->fBufferSize);
+        fBufferBalance -= (fOSSWriteOffset - fOSSReadOffset);
+        fBufferBalance += TimeToOffset(fOSSWriteSync, fOSSReadSync, fEngineControl->fSampleRate);
 
         // Force balancing if sync times deviate too much.
         jack_time_t slack = FramesToTime((fEngineControl->fBufferSize * 2) / 3, fEngineControl->fSampleRate);
