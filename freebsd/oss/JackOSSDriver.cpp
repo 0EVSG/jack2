@@ -41,24 +41,24 @@ using namespace std;
 namespace
 {
 
-inline jack_nframes_t us_to_samples(jack_time_t time, jack_nframes_t sample_rate) {
+inline jack_nframes_t TimeToFrames(jack_time_t time, jack_nframes_t sample_rate) {
     return ((time * sample_rate) + 500000ULL) / 1000000ULL;
 }
 
-inline long long us_to_frames(jack_time_t time1, jack_time_t time2, jack_nframes_t sample_rate)
+inline long long TimeToOffset(jack_time_t time1, jack_time_t time2, jack_nframes_t sample_rate)
 {
     if (time2 > time1) {
-        return us_to_samples(time2 - time1, sample_rate);
+        return TimeToFrames(time2 - time1, sample_rate);
     } else {
-        return 0LL - us_to_samples(time1 - time2, sample_rate);
+        return 0LL - TimeToFrames(time1 - time2, sample_rate);
     }
 }
 
-inline jack_time_t frames_to_us(jack_nframes_t frames, jack_nframes_t sample_rate) {
+inline jack_time_t FramesToTime(jack_nframes_t frames, jack_nframes_t sample_rate) {
     return ((frames * 1000000ULL) + (sample_rate / 2ULL)) / sample_rate;
 }
 
-inline jack_nframes_t round_up(jack_nframes_t frames, jack_nframes_t block) {
+inline jack_nframes_t RoundUp(jack_nframes_t frames, jack_nframes_t block) {
     if (block > 0) {
         frames += (block - 1);
         frames -= (frames % block);
@@ -66,14 +66,14 @@ inline jack_nframes_t round_up(jack_nframes_t frames, jack_nframes_t block) {
     return frames;
 }
 
-inline jack_time_t round_down(jack_time_t time, jack_time_t interval) {
+inline jack_time_t RoundDown(jack_time_t time, jack_time_t interval) {
     if (interval > 0) {
         time -= (time % interval);
     }
     return time;
 }
 
-int get_sample_format(int bits)
+int GetSampleFormat(int bits)
 {
     switch(bits) {
         // Native-endian signed 32 bit samples.
@@ -89,7 +89,7 @@ int get_sample_format(int bits)
     }
 }
 
-unsigned int get_sample_size(int format)
+unsigned int GetSampleSize(int format)
 {
     switch(format) {
         // Native-endian signed 32 bit samples.
@@ -105,6 +105,14 @@ unsigned int get_sample_size(int format)
         default:
             return 0;
     }
+}
+
+inline int UpToPower2(int x)
+{
+    int r = 0;
+    while ((1 << r) < x)
+        r++;
+    return r;
 }
 
 }
@@ -136,56 +144,54 @@ int gCycleCount = 0;
 
 #endif
 
-inline int int2pow2(int x)	{ int r = 0; while ((1 << r) < x) r++; return r; }
-
 static inline void CopyAndConvertIn(jack_sample_t *dst, void *src, size_t nframes, int channel, int chcount, int bits)
 {
     switch (bits) {
 
-		case 16: {
-		    signed short *s16src = (signed short*)src;
+        case 16: {
+            signed short *s16src = (signed short*)src;
             s16src += channel;
             sample_move_dS_s16(dst, (char*)s16src, nframes, chcount<<1);
-			break;
+            break;
         }
-		case 24: {
+        case 24: {
             char *s24src = (char*)src;
             s24src += channel * 3;
             sample_move_dS_s24(dst, s24src, nframes, chcount*3);
-			break;
+            break;
         }
-		case 32: {
-			signed int *s32src = (signed int*)src;
+        case 32: {
+            signed int *s32src = (signed int*)src;
             s32src += channel;
             sample_move_dS_s32u24(dst, (char*)s32src, nframes, chcount<<2);
-			break;
+            break;
         }
-	}
+    }
 }
 
 static inline void CopyAndConvertOut(void *dst, jack_sample_t *src, size_t nframes, int channel, int chcount, int bits)
 {
-	switch (bits) {
+    switch (bits) {
 
-		case 16: {
-			signed short *s16dst = (signed short*)dst;
+        case 16: {
+            signed short *s16dst = (signed short*)dst;
             s16dst += channel;
             sample_move_d16_sS((char*)s16dst, src, nframes, chcount<<1, NULL); // No dithering for now...
-			break;
+            break;
         }
-		case 24: {
+        case 24: {
             char *s24dst = (char*)dst;
             s24dst += channel * 3;
             sample_move_d24_sS(s24dst, src, nframes, chcount*3, NULL);
-			break;
+            break;
         }
-		case 32: {
+        case 32: {
             signed int *s32dst = (signed int*)dst;
             s32dst += channel;
             sample_move_d32u24_sS((char*)s32dst, src, nframes, chcount<<2, NULL);
-			break;
+            break;
         }
-	}
+    }
 }
 
 void JackOSSDriver::DisplayDeviceInfo()
@@ -453,16 +459,16 @@ int JackOSSDriver::WaitAndSync()
     if (fInFD > 0 && fOSSReadSync != 0) {
         if (fOSSReadOffset + fEngineControl->fBufferSize > 0) {
             jack_nframes_t frames = fOSSReadOffset + fEngineControl->fBufferSize;
-            jack_nframes_t rounded = round_up(frames, fInBlockSize);
-            fOSSReadSync += frames_to_us(rounded, fEngineControl->fSampleRate);
+            jack_nframes_t rounded = RoundUp(frames, fInBlockSize);
+            fOSSReadSync += FramesToTime(rounded, fEngineControl->fSampleRate);
             fOSSReadOffset -= rounded;
         }
     }
     if (fOutFD > 0 && fOSSWriteSync != 0) {
         if (fOSSWriteOffset > fNperiods * fEngineControl->fBufferSize) {
             jack_nframes_t frames = fOSSWriteOffset - fNperiods * fEngineControl->fBufferSize;
-            jack_nframes_t rounded = round_up(frames, fOutBlockSize);
-            fOSSWriteSync += frames_to_us(rounded, fEngineControl->fSampleRate);
+            jack_nframes_t rounded = RoundUp(frames, fOutBlockSize);
+            fOSSWriteSync += FramesToTime(rounded, fEngineControl->fSampleRate);
             fOSSWriteOffset -= rounded;
         }
     }
@@ -512,17 +518,17 @@ int JackOSSDriver::WaitAndSync()
                 } else {
                     // Adapt expected sync time when early or late - in whole block intervals.
                     // Account for some speed drift, but otherwise round down to earlier interval.
-                    jack_time_t interval = frames_to_us(fInBlockSize, fEngineControl->fSampleRate);
+                    jack_time_t interval = FramesToTime(fInBlockSize, fEngineControl->fSampleRate);
                     jack_time_t remainder = fOSSReadSync % interval;
                     jack_time_t max_drift = interval / 4;
-                    jack_time_t rounded = round_down((now - remainder) + max_drift, interval) + remainder;
+                    jack_time_t rounded = RoundDown((now - remainder) + max_drift, interval) + remainder;
                     //! \todo Streamline debug output.
-                    long long rounding = us_to_frames(now, rounded, fEngineControl->fSampleRate);
+                    long long rounding = TimeToOffset(now, rounded, fEngineControl->fSampleRate);
                     if (abs(rounding) > (fInBlockSize / 8)) {
                         jack_info("JackOSSDriver::WaitAndSync capture sync rounded to %ld frames", rounding);
                     }
                     long long deviation = ptr.fifo_samples + fOSSReadOffset;
-                    deviation -= us_to_frames(fOSSReadSync, rounded, fEngineControl->fSampleRate);
+                    deviation -= TimeToOffset(fOSSReadSync, rounded, fEngineControl->fSampleRate);
                     if (abs(deviation) > (fInBlockSize / 4)) {
                         jack_info("JackOSSDriver::WaitAndSync capture sync deviates by %ld frames", deviation);
                     }
@@ -555,17 +561,17 @@ int JackOSSDriver::WaitAndSync()
                 } else {
                     // Adapt expected sync time when early or late - in whole block intervals.
                     // Account for some speed drift, but otherwise round down to earlier interval.
-                    jack_time_t interval = frames_to_us(fOutBlockSize, fEngineControl->fSampleRate);
+                    jack_time_t interval = FramesToTime(fOutBlockSize, fEngineControl->fSampleRate);
                     jack_time_t remainder = fOSSWriteSync % interval;
                     jack_time_t max_drift = interval / 4;
-                    jack_time_t rounded = round_down((now - remainder) + max_drift, interval) + remainder;
+                    jack_time_t rounded = RoundDown((now - remainder) + max_drift, interval) + remainder;
                     //! \todo Streamline debug output.
-                    long long rounding = us_to_frames(now, rounded, fEngineControl->fSampleRate);
+                    long long rounding = TimeToOffset(now, rounded, fEngineControl->fSampleRate);
                     if (abs(rounding) > (fOutBlockSize / 8)) {
                         jack_info("JackOSSDriver::WaitAndSync playback sync rounded to %ld frames", rounding);
                     }
                     long long deviation = fOSSWriteOffset - ptr.fifo_samples ;
-                    deviation -= us_to_frames(fOSSWriteSync, rounded, fEngineControl->fSampleRate);
+                    deviation -= TimeToOffset(fOSSWriteSync, rounded, fEngineControl->fSampleRate);
                     if (abs(deviation) > (fOutBlockSize / 4)) {
                         jack_info("JackOSSDriver::WaitAndSync playback sync deviates by %ld frames", deviation);
                     }
@@ -582,18 +588,18 @@ int JackOSSDriver::WaitAndSync()
     fBufferBalance = 0;
     if (fInFD > 0 && fOutFD > 0) {
         if (fOSSReadSync > fOSSWriteSync) {
-            long long fill = us_to_samples(fOSSReadSync - fOSSWriteSync, fEngineControl->fSampleRate);
+            long long fill = TimeToFrames(fOSSReadSync - fOSSWriteSync, fEngineControl->fSampleRate);
             fBufferBalance += fill;
         }
         if (fOSSWriteSync > fOSSReadSync) {
-            long long omit = us_to_samples(fOSSWriteSync - fOSSReadSync, fEngineControl->fSampleRate);
+            long long omit = TimeToFrames(fOSSWriteSync - fOSSReadSync, fEngineControl->fSampleRate);
             fBufferBalance -= omit;
         }
         fBufferBalance -= (fOSSWriteOffset - fOSSReadOffset);
         fBufferBalance += ((1 + fNperiods) * fEngineControl->fBufferSize);
 
         // Force balancing if sync times deviate too much.
-        jack_time_t slack = frames_to_us((fEngineControl->fBufferSize * 2) / 3, fEngineControl->fSampleRate);
+        jack_time_t slack = FramesToTime((fEngineControl->fBufferSize * 2) / 3, fEngineControl->fSampleRate);
         fForceBalancing = fForceBalancing || (fOSSReadSync > fOSSWriteSync + slack);
         fForceBalancing = fForceBalancing || (fOSSWriteSync > fOSSReadSync + slack);
         // Force balancing if buffer is badly balanced.
@@ -627,13 +633,13 @@ int JackOSSDriver::OpenInput()
         }
     }
 
-    cur_sample_format = get_sample_format(fBits);
+    cur_sample_format = GetSampleFormat(fBits);
     if (ioctl(fInFD, SNDCTL_DSP_SETFMT, &cur_sample_format) == -1) {
         jack_error("JackOSSDriver::OpenInput failed to set format : %s@%i, errno = %d", __FILE__, __LINE__, errno);
         goto error;
     }
-    fInSampleSize = get_sample_size(cur_sample_format);
-    if (cur_sample_format != get_sample_format(fBits)) {
+    fInSampleSize = GetSampleSize(cur_sample_format);
+    if (cur_sample_format != GetSampleFormat(fBits)) {
         if (fInSampleSize > 0) {
             jack_info("JackOSSDriver::OpenInput driver forced %d bit sample format", fInSampleSize * 8);
         } else {
@@ -675,7 +681,7 @@ int JackOSSDriver::OpenInput()
         // Total size of the OSS recording buffer is too small, resize it.
         unsigned int buf_size = fInputBufferSize * (1 + fNperiods);
         // Keep current fragment size if possible - respect OSS latency settings.
-        gFragFormat = int2pow2(info.fragsize);
+        gFragFormat = UpToPower2(info.fragsize);
         unsigned int frag_size = 1U << gFragFormat;
         gFragFormat |= ((buf_size + frag_size - 1) / frag_size) << 16;
         jack_info("JackOSSDriver::OpenInput request %d fragments of %d", (gFragFormat >> 16), frag_size);
@@ -740,13 +746,13 @@ int JackOSSDriver::OpenOutput()
         }
     }
 
-    cur_sample_format = get_sample_format(fBits);
+    cur_sample_format = GetSampleFormat(fBits);
     if (ioctl(fOutFD, SNDCTL_DSP_SETFMT, &cur_sample_format) == -1) {
         jack_error("JackOSSDriver::OpenOutput failed to set format : %s@%i, errno = %d", __FILE__, __LINE__, errno);
         goto error;
     }
-    fOutSampleSize = get_sample_size(cur_sample_format);
-    if (cur_sample_format != get_sample_format(fBits)) {
+    fOutSampleSize = GetSampleSize(cur_sample_format);
+    if (cur_sample_format != GetSampleFormat(fBits)) {
         if (fOutSampleSize > 0) {
             jack_info("JackOSSDriver::OpenOutput driver forced %d bit sample format", fOutSampleSize * 8);
         } else {
@@ -789,7 +795,7 @@ int JackOSSDriver::OpenOutput()
         unsigned int buf_size = fOutputBufferSize * (1 + fNperiods);
         // Keep current fragment size if possible - respect OSS latency settings.
         // Some sound cards like Intel HDA may stutter when changing the fragment size.
-        gFragFormat = int2pow2(info.fragsize);
+        gFragFormat = UpToPower2(info.fragsize);
         unsigned int frag_size = 1U << gFragFormat;
         gFragFormat |= ((buf_size + frag_size - 1) / frag_size) << 16;
         jack_info("JackOSSDriver::OpenOutput request %d fragments of %d", (gFragFormat >> 16), frag_size);
@@ -1032,7 +1038,7 @@ int JackOSSDriver::Read()
 
     if (count > 0) {
         jack_time_t now = GetMicroSeconds();
-        long long passed = us_to_samples(now - fOSSReadSync, fEngineControl->fSampleRate);
+        long long passed = TimeToFrames(now - fOSSReadSync, fEngineControl->fSampleRate);
         passed -= (passed % fInBlockSize);
         if (passed > fOSSReadOffset + fOSSInBuffer) {
             // Overrun, adjust read and write position.
@@ -1128,7 +1134,7 @@ int JackOSSDriver::Write()
             jack_info("JackOSSDriver::Write playback offset %ld sync %ld ago", fOSSWriteOffset, now - fOSSWriteSync);
             jack_info("JackOSSDriver::Write buffer balancing %ld", fBufferBalance);
         }
-        long long passed = us_to_samples(now - fOSSWriteSync, fEngineControl->fSampleRate);
+        long long passed = TimeToFrames(now - fOSSWriteSync, fEngineControl->fSampleRate);
         long long consumed = passed - (passed % fOutBlockSize);
         long long tolerance = (fOutBlockSize > 1) ? 0 : fOutMeanStep;
         long long overdue = 0;
