@@ -522,16 +522,6 @@ int JackOSSDriver::WaitAndSync()
                     jack_time_t remainder = fOSSReadSync % interval;
                     jack_time_t max_drift = interval / 4;
                     jack_time_t rounded = RoundDown((now - remainder) + max_drift, interval) + remainder;
-                    //! \todo Streamline debug output.
-                    long long rounding = TimeToOffset(now, rounded, fEngineControl->fSampleRate);
-                    if (abs(rounding) > (fInBlockSize / 8)) {
-                        jack_info("JackOSSDriver::WaitAndSync capture sync rounded to %ld frames", rounding);
-                    }
-                    long long deviation = ptr.fifo_samples + fOSSReadOffset;
-                    deviation -= TimeToOffset(fOSSReadSync, rounded, fEngineControl->fSampleRate);
-                    if (abs(deviation) > (fInBlockSize / 4)) {
-                        jack_info("JackOSSDriver::WaitAndSync capture sync deviates by %ld frames", deviation);
-                    }
                     // Let sync time converge slowly when late, prefer earlier sync times.
                     fOSSReadSync = min(rounded, now) / 2 + now / 2;
                     fOSSReadOffset = -ptr.fifo_samples;
@@ -565,16 +555,6 @@ int JackOSSDriver::WaitAndSync()
                     jack_time_t remainder = fOSSWriteSync % interval;
                     jack_time_t max_drift = interval / 4;
                     jack_time_t rounded = RoundDown((now - remainder) + max_drift, interval) + remainder;
-                    //! \todo Streamline debug output.
-                    long long rounding = TimeToOffset(now, rounded, fEngineControl->fSampleRate);
-                    if (abs(rounding) > (fOutBlockSize / 8)) {
-                        jack_info("JackOSSDriver::WaitAndSync playback sync rounded to %ld frames", rounding);
-                    }
-                    long long deviation = fOSSWriteOffset - ptr.fifo_samples ;
-                    deviation -= TimeToOffset(fOSSWriteSync, rounded, fEngineControl->fSampleRate);
-                    if (abs(deviation) > (fOutBlockSize / 4)) {
-                        jack_info("JackOSSDriver::WaitAndSync playback sync deviates by %ld frames", deviation);
-                    }
                     // Let sync time converge slowly when late, prefer earlier sync times.
                     fOSSWriteSync = min(rounded, now) / 2 + now / 2;
                     fOSSWriteOffset = ptr.fifo_samples;
