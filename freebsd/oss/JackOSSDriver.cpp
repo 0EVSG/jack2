@@ -232,20 +232,20 @@ void JackOSSDriver::DisplayDeviceInfo()
         if (ioctl(fOutFD, SNDCTL_DSP_GETCAPS, &cap) == -1)  {
             jack_error("JackOSSDriver::DisplayDeviceInfo SNDCTL_DSP_GETCAPS failed : %s@%i, errno = %d", __FILE__, __LINE__, errno);
         } else {
-            if (cap & DSP_CAP_DUPLEX) 	jack_info(" DSP_CAP_DUPLEX");
+            if (cap & DSP_CAP_DUPLEX)   jack_info(" DSP_CAP_DUPLEX");
             if (cap & DSP_CAP_REALTIME) jack_info(" DSP_CAP_REALTIME");
-            if (cap & DSP_CAP_BATCH) 	jack_info(" DSP_CAP_BATCH");
-            if (cap & DSP_CAP_COPROC) 	jack_info(" DSP_CAP_COPROC");
+            if (cap & DSP_CAP_BATCH)    jack_info(" DSP_CAP_BATCH");
+            if (cap & DSP_CAP_COPROC)   jack_info(" DSP_CAP_COPROC");
             if (cap & DSP_CAP_TRIGGER)  jack_info(" DSP_CAP_TRIGGER");
-            if (cap & DSP_CAP_MMAP) 	jack_info(" DSP_CAP_MMAP");
-            if (cap & DSP_CAP_MULTI) 	jack_info(" DSP_CAP_MULTI");
-            if (cap & DSP_CAP_BIND) 	jack_info(" DSP_CAP_BIND");
+            if (cap & DSP_CAP_MMAP)     jack_info(" DSP_CAP_MMAP");
+            if (cap & DSP_CAP_MULTI)    jack_info(" DSP_CAP_MULTI");
+            if (cap & DSP_CAP_BIND)     jack_info(" DSP_CAP_BIND");
         }
     }
 
     if (fCapture) {
 
-      	oss_sysinfo si;
+        oss_sysinfo si;
         if (ioctl(fInFD, OSS_SYSINFO, &si) == -1) {
             jack_error("JackOSSDriver::DisplayDeviceInfo OSS_SYSINFO failed : %s@%i, errno = %d", __FILE__, __LINE__, errno);
         } else {
@@ -270,14 +270,14 @@ void JackOSSDriver::DisplayDeviceInfo()
         if (ioctl(fInFD, SNDCTL_DSP_GETCAPS, &cap) == -1) {
             jack_error("JackOSSDriver::DisplayDeviceInfo SNDCTL_DSP_GETCAPS failed : %s@%i, errno = %d", __FILE__, __LINE__, errno);
         } else {
-            if (cap & DSP_CAP_DUPLEX) 	jack_info(" DSP_CAP_DUPLEX");
+            if (cap & DSP_CAP_DUPLEX)   jack_info(" DSP_CAP_DUPLEX");
             if (cap & DSP_CAP_REALTIME) jack_info(" DSP_CAP_REALTIME");
-            if (cap & DSP_CAP_BATCH) 	jack_info(" DSP_CAP_BATCH");
-            if (cap & DSP_CAP_COPROC) 	jack_info(" DSP_CAP_COPROC");
+            if (cap & DSP_CAP_BATCH)    jack_info(" DSP_CAP_BATCH");
+            if (cap & DSP_CAP_COPROC)   jack_info(" DSP_CAP_COPROC");
             if (cap & DSP_CAP_TRIGGER)  jack_info(" DSP_CAP_TRIGGER");
-            if (cap & DSP_CAP_MMAP) 	jack_info(" DSP_CAP_MMAP");
-            if (cap & DSP_CAP_MULTI) 	jack_info(" DSP_CAP_MULTI");
-            if (cap & DSP_CAP_BIND) 	jack_info(" DSP_CAP_BIND");
+            if (cap & DSP_CAP_MMAP)     jack_info(" DSP_CAP_MMAP");
+            if (cap & DSP_CAP_MULTI)    jack_info(" DSP_CAP_MULTI");
+            if (cap & DSP_CAP_BIND)     jack_info(" DSP_CAP_BIND");
         }
     }
 
@@ -837,20 +837,20 @@ error:
 }
 
 int JackOSSDriver::Open(jack_nframes_t nframes,
-                      int user_nperiods,
-                      jack_nframes_t samplerate,
-                      bool capturing,
-                      bool playing,
-                      int inchannels,
-                      int outchannels,
-                      bool excl,
-                      bool monitor,
-                      const char* capture_driver_uid,
-                      const char* playback_driver_uid,
-                      jack_nframes_t capture_latency,
-                      jack_nframes_t playback_latency,
-                      int bits,
-                      bool ignorehwbuf)
+                        int user_nperiods,
+                        jack_nframes_t samplerate,
+                        bool capturing,
+                        bool playing,
+                        int inchannels,
+                        int outchannels,
+                        bool excl,
+                        bool monitor,
+                        const char* capture_driver_uid,
+                        const char* playback_driver_uid,
+                        jack_nframes_t capture_latency,
+                        jack_nframes_t playback_latency,
+                        int bits,
+                        bool ignorehwbuf)
 {
     //! \todo Test latencies in asynchronous mode.
     // Additional playback latency as requested by the user.
@@ -869,10 +869,10 @@ int JackOSSDriver::Open(jack_nframes_t nframes,
         fNperiods = user_nperiods;
         fExcl = excl;
 
-    #ifdef JACK_MONITOR
+#ifdef JACK_MONITOR
         // Force memory page in
         memset(&gCycleTable, 0, sizeof(gCycleTable));
-    #endif
+#endif
 
         if (OpenAux() < 0) {
             Close();
@@ -885,7 +885,7 @@ int JackOSSDriver::Open(jack_nframes_t nframes,
 
 int JackOSSDriver::Close()
 {
- #ifdef JACK_MONITOR
+#ifdef JACK_MONITOR
     FILE* file = fopen("OSSProfiling.log", "w");
 
     if (file) {
@@ -931,7 +931,7 @@ int JackOSSDriver::Close()
 
         fclose(file);
     }
- #endif
+#endif
     int res = JackAudioDriver::Close();
     CloseAux();
     return res;
@@ -1106,9 +1106,9 @@ int JackOSSDriver::Read()
             }
         }
 
-    #ifdef JACK_MONITOR
+#ifdef JACK_MONITOR
         gCycleTable.fTable[gCycleCount].fAfterReadConvert = GetMicroSeconds();
-    #endif
+#endif
 
         return 0;
     }
@@ -1169,9 +1169,9 @@ int JackOSSDriver::Write()
         }
     }
 
-  #ifdef JACK_MONITOR
+#ifdef JACK_MONITOR
     gCycleTable.fTable[gCycleCount].fBeforeWrite = GetMicroSeconds();
-  #endif
+#endif
 
     if (skip < fOutputBufferSize) {
         count = ::write(fOutFD, ((char*)fOutputBuffer) + skip, fOutputBufferSize - skip);
@@ -1184,12 +1184,12 @@ int JackOSSDriver::Write()
         fOSSWriteOffset += (count / (fOutSampleSize * fPlaybackChannels));
     }
 
-  #ifdef JACK_MONITOR
+#ifdef JACK_MONITOR
     if (count > 0 && count != (int)(fOutputBufferSize - skip))
         jack_log("JackOSSDriver::Write count = %ld", count / (fOutSampleSize * fPlaybackChannels));
     gCycleTable.fTable[gCycleCount].fAfterWrite = GetMicroSeconds();
     gCycleCount = (gCycleCount == CYCLE_POINTS - 1) ? gCycleCount: gCycleCount + 1;
-  #endif
+#endif
 
     static unsigned int sample_count = 0;
     if (count > 0) {
