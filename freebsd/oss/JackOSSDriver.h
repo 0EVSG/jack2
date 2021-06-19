@@ -28,13 +28,13 @@ namespace Jack
 
 typedef jack_default_audio_sample_t jack_sample_t;
 
-#define OSS_DRIVER_DEF_DEV	"/dev/dsp"
-#define OSS_DRIVER_DEF_FS	48000
-#define OSS_DRIVER_DEF_BLKSIZE	1024
-#define OSS_DRIVER_DEF_NPERIODS	1
-#define OSS_DRIVER_DEF_BITS	16
-#define OSS_DRIVER_DEF_INS	2
-#define OSS_DRIVER_DEF_OUTS	2
+#define OSS_DRIVER_DEF_DEV "/dev/dsp"
+#define OSS_DRIVER_DEF_FS 48000
+#define OSS_DRIVER_DEF_BLKSIZE 1024
+#define OSS_DRIVER_DEF_NPERIODS 1
+#define OSS_DRIVER_DEF_BITS 16
+#define OSS_DRIVER_DEF_INS 2
+#define OSS_DRIVER_DEF_OUTS 2
 
 /*!
 \brief The OSS driver.
