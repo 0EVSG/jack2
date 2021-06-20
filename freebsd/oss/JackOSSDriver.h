@@ -53,6 +53,8 @@ class JackOSSDriver : public JackAudioDriver
         bool fPlayback;
         bool fExcl;
         bool fIgnoreHW;
+        jack_nframes_t fExtraCaptureLatency;
+        jack_nframes_t fExtraPlaybackLatency;
 
         unsigned int fInSampleSize;
         unsigned int fOutSampleSize;
@@ -95,6 +97,7 @@ class JackOSSDriver : public JackAudioDriver
                 : JackAudioDriver(name, alias, engine, table),
                 fInFD(-1), fOutFD(-1), fBits(0),
                 fNperiods(0), fCapture(false), fPlayback(false), fExcl(false), fIgnoreHW(true),
+                fExtraCaptureLatency(0), fExtraPlaybackLatency(0),
                 fInSampleSize(0), fOutSampleSize(0),
                 fInputBufferSize(0), fOutputBufferSize(0),
                 fInputBuffer(NULL), fOutputBuffer(NULL),
