@@ -826,22 +826,25 @@ int JackOSSDriver::Open(jack_nframes_t nframes,
                         int bits,
                         bool ignorehwbuf)
 {
+    // Store local settings first.
+    fCapture = capturing;
+    fPlayback = playing;
+    fBits = bits;
+    fIgnoreHW = ignorehwbuf;
+    fNperiods = user_nperiods;
+    fExcl = excl;
+    fExtraCaptureLatency = capture_latency;
+    fExtraPlaybackLatency = playback_latency;
+
     //! \todo Test latencies in asynchronous mode.
-    // Additional playback latency as requested by the user.
-    // This way the remaining latency should be symmetric as reported by jack_iodelay.
+    // Additional playback latency introduced by the OSS buffer. The extra hardware
+    // latency given by the user should then be symmetric as reported by jack_iodelay.
     playback_latency += user_nperiods * nframes;
     // Generic JackAudioDriver Open
     if (JackAudioDriver::Open(nframes, samplerate, capturing, playing, inchannels, outchannels, monitor,
         capture_driver_uid, playback_driver_uid, capture_latency, playback_latency) != 0) {
         return -1;
     } else {
-
-        fCapture = capturing;
-        fPlayback = playing;
-        fBits = bits;
-        fIgnoreHW = ignorehwbuf;
-        fNperiods = user_nperiods;
-        fExcl = excl;
 
 #ifdef JACK_MONITOR
         // Force memory page in
@@ -1211,7 +1214,11 @@ int JackOSSDriver::Write()
 int JackOSSDriver::SetBufferSize(jack_nframes_t buffer_size)
 {
     CloseAux();
-    //! \todo Adjust the latency values when changing buffer size.
+
+    // Additional latency introduced by the OSS buffer, depends on buffer size.
+    fCaptureLatency = fExtraCaptureLatency;
+    fPlaybackLatency = fExtraPlaybackLatency + fNperiods * buffer_size;
+
     JackAudioDriver::SetBufferSize(buffer_size); // Generic change, never fails
     return OpenAux();
 }
