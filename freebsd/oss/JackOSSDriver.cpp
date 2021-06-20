@@ -1019,11 +1019,18 @@ int JackOSSDriver::Read()
         return 0;
     }
 
-    ssize_t count;
+    // Try to read multiple times in case of short reads.
+    size_t count = 0;
+    for (int i = 0; i < 3 && count < fInputBufferSize; ++i) {
+        ssize_t ret = ::read(fInFD, (char*)fInputBuffer + count, fInputBufferSize - count);
+        if (ret < 0) {
+            jack_log("JackOSSDriver::Read error = %s", strerror(errno));
+            return -1;
+        }
+        count += ret;
+    }
 
-    audio_errinfo ei_in;
-    count = ::read(fInFD, fInputBuffer, fInputBufferSize);
-
+    // Read offset accounting and overrun detection.
     if (count > 0) {
         jack_time_t now = GetMicroSeconds();
         long long passed = TimeToFrames(now - fOSSReadSync, fEngineControl->fSampleRate);
@@ -1065,11 +1072,13 @@ int JackOSSDriver::Read()
     gCycleTable.fTable[gCycleCount].fAfterRead = GetMicroSeconds();
 #endif
 
-    // XRun detection
+    // Check and clear OSS errors.
+    audio_errinfo ei_in;
     if (ioctl(fInFD, SNDCTL_DSP_GETERROR, &ei_in) == 0) {
 
+        // Not reliable for overrun detection, virtual_oss doesn't implement it.
         if (ei_in.rec_overruns > 0 ) {
-            jack_error("JackOSSDriver::Read overruns = %d", ei_in.rec_overruns);
+            jack_error("JackOSSDriver::Read %d overrun events", ei_in.rec_overruns);
         }
 
         if (ei_in.rec_errorcount > 0 && ei_in.rec_lasterror != 0) {
@@ -1077,27 +1086,22 @@ int JackOSSDriver::Read()
         }
     }
 
-    if (count < 0) {
-        jack_log("JackOSSDriver::Read error = %s", strerror(errno));
+    if (count < fInputBufferSize) {
+        jack_error("JackOSSDriver::Read incomplete read of %ld bytes", count);
         return -1;
-    } else if (count < (int)fInputBufferSize) {
-        //! \todo Try multiple times?
-        jack_error("JackOSSDriver::Read error bytes read = %ld", count);
-        return -1;
-    } else {
+    }
 
-        for (int i = 0; i < fCaptureChannels; i++) {
-            if (fGraphManager->GetConnectionsNum(fCapturePortList[i]) > 0) {
-                CopyAndConvertIn(GetInputBuffer(i), fInputBuffer, fEngineControl->fBufferSize, i, fCaptureChannels, fInSampleSize * 8);
-            }
+    for (int i = 0; i < fCaptureChannels; i++) {
+        if (fGraphManager->GetConnectionsNum(fCapturePortList[i]) > 0) {
+            CopyAndConvertIn(GetInputBuffer(i), fInputBuffer, fEngineControl->fBufferSize, i, fCaptureChannels, fInSampleSize * 8);
         }
+    }
 
 #ifdef JACK_MONITOR
-        gCycleTable.fTable[gCycleCount].fAfterReadConvert = GetMicroSeconds();
+    gCycleTable.fTable[gCycleCount].fAfterReadConvert = GetMicroSeconds();
 #endif
 
-        return 0;
-    }
+    return 0;
 }
 
 int JackOSSDriver::Write()
