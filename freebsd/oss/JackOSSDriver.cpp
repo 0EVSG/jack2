@@ -1031,6 +1031,7 @@ int JackOSSDriver::Read()
             jack_error("JackOSSDriver::Read missed %ld frames by overrun, passed=%ld, sync=%ld, now=%ld", missed, passed, fOSSReadSync, now);
             fOSSReadOffset += missed;
             fOSSWriteOffset += missed;
+            NotifyXRun(now, float(FramesToTime(missed, fEngineControl->fSampleRate)));
         }
         fOSSReadOffset += count / (fInSampleSize * fCaptureChannels);
     }
@@ -1066,9 +1067,6 @@ int JackOSSDriver::Read()
 
         if (ei_in.rec_overruns > 0 ) {
             jack_error("JackOSSDriver::Read overruns = %d", ei_in.rec_overruns);
-            jack_time_t cur_time = GetMicroSeconds();
-            //! \todo Improve overrun notification with real time info.
-            NotifyXRun(cur_time, float(cur_time - fBeginDateUst));   // Better this value than nothing...
         }
 
         if (ei_in.rec_errorcount > 0 && ei_in.rec_lasterror != 0) {
@@ -1128,6 +1126,8 @@ int JackOSSDriver::Write()
             overdue = consumed - fOSSWriteOffset - tolerance;
             jack_error("JackOSSDriver::Write late by %ld, skip %ld frames", passed - fOSSWriteOffset, overdue);
             jack_error("JackOSSDriver::Write %ld frame offset from sync %ld us ago", fOSSWriteOffset, now - fOSSWriteSync);
+            // TODO: Is it necessary to notify for write underruns?
+            NotifyXRun(now, float(FramesToTime(overdue, fEngineControl->fSampleRate)));
         }
         long long write_length = progress - overdue;
         if (write_length > fEngineControl->fBufferSize) {
@@ -1190,9 +1190,6 @@ int JackOSSDriver::Write()
 
         if (ei_out.play_underruns > 0) {
             jack_error("JackOSSDriver::Write underruns = %d", ei_out.play_underruns);
-            jack_time_t cur_time = GetMicroSeconds();
-            //! \todo Improve underrun notification with real time info.
-            NotifyXRun(cur_time, float(cur_time - fBeginDateUst));   // Better this value than nothing...
         }
 
         if (ei_out.play_errorcount > 0 && ei_out.play_lasterror != 0) {
