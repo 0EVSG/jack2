@@ -1114,38 +1114,41 @@ int JackOSSDriver::Write()
 
     if (fOSSWriteSync > 0) {
         jack_time_t now = GetMicroSeconds();
-        long long progress = fEngineControl->fBufferSize;
-        if (fForceBalancing) {
-            fForceBalancing = false;
-            progress += fBufferBalance;
-            jack_info("JackOSSDriver::Write recording offset %ld sync %ld ago", fOSSReadOffset, now - fOSSReadSync);
-            jack_info("JackOSSDriver::Write playback offset %ld sync %ld ago", fOSSWriteOffset, now - fOSSWriteSync);
-            jack_info("JackOSSDriver::Write buffer balancing %ld", fBufferBalance);
-        }
+        // Check for underruns, rounded to hardware block size if available.
         long long passed = TimeToFrames(now - fOSSWriteSync, fEngineControl->fSampleRate);
         long long consumed = passed - (passed % fOutBlockSize);
         long long tolerance = (fOutBlockSize > 1) ? 0 : fOutMeanStep;
         long long overdue = 0;
         if (consumed > fOSSWriteOffset + tolerance) {
-            // Skip playback to avoid buffer accumulation through excessive input.
+            // Skip playback data that already passed.
             overdue = consumed - fOSSWriteOffset - tolerance;
-            jack_error("JackOSSDriver::Write late by %ld, skip %ld frames", passed - fOSSWriteOffset, overdue);
-            jack_error("JackOSSDriver::Write %ld frame offset from sync %ld us ago", fOSSWriteOffset, now - fOSSWriteSync);
+            jack_error("JackOSSDriver::Write underrun, late by %ld, skip %ld frames", passed - fOSSWriteOffset, overdue);
+            jack_error("JackOSSDriver::Write playback offset %ld frames synced %ld us ago", fOSSWriteOffset, now - fOSSWriteSync);
             // TODO: Is it necessary to notify for write underruns?
             NotifyXRun(now, float(FramesToTime(overdue, fEngineControl->fSampleRate)));
+            // Also consider buffer balance, there was a gap in playback anyway.
+            fForceBalancing = true;
         }
+        // Account for buffer balance if needed.
+        long long progress = fEngineControl->fBufferSize;
+        if (fForceBalancing) {
+            fForceBalancing = false;
+            progress = max(progress + fBufferBalance, 0LL);
+            jack_info("JackOSSDriver::Write recording offset %ld sync %ld ago", fOSSReadOffset, now - fOSSReadSync);
+            jack_info("JackOSSDriver::Write playback offset %ld sync %ld ago", fOSSWriteOffset, now - fOSSWriteSync);
+            jack_info("JackOSSDriver::Write buffer balancing %ld", fBufferBalance);
+        }
+        // How many samples to skip or prepend due to underrun and balancing.
         long long write_length = progress - overdue;
-        if (write_length > fEngineControl->fBufferSize) {
-            jack_nframes_t fill = write_length - fEngineControl->fBufferSize;
-            WriteSilence(fill);
-        }
         if (write_length <= 0) {
             skip += fOutputBufferSize;
-            // TODO: Balance and progress may be less than minus one period.
             fOSSWriteOffset += progress;
         } else if (write_length < fEngineControl->fBufferSize) {
             skip += (fEngineControl->fBufferSize - write_length) * fOutSampleSize * fPlaybackChannels;
             fOSSWriteOffset += overdue;
+        } else if (write_length > fEngineControl->fBufferSize) {
+            jack_nframes_t fill = write_length - fEngineControl->fBufferSize;
+            WriteSilence(fill);
         }
     }
 
