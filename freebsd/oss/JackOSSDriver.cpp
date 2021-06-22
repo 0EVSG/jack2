@@ -1022,7 +1022,7 @@ int JackOSSDriver::Read()
     // Try to read multiple times in case of short reads.
     size_t count = 0;
     for (int i = 0; i < 3 && count < fInputBufferSize; ++i) {
-        ssize_t ret = ::read(fInFD, (char*)fInputBuffer + count, fInputBufferSize - count);
+        ssize_t ret = ::read(fInFD, ((char*)fInputBuffer) + count, fInputBufferSize - count);
         if (ret < 0) {
             jack_log("JackOSSDriver::Read error = %s", strerror(errno));
             return -1;
@@ -1110,9 +1110,7 @@ int JackOSSDriver::Write()
         return 0;
     }
 
-    ssize_t count;
     unsigned int skip = 0;
-    audio_errinfo ei_out;
 
     if (fOSSWriteSync > 0) {
         jack_time_t now = GetMicroSeconds();
@@ -1143,6 +1141,7 @@ int JackOSSDriver::Write()
         }
         if (write_length <= 0) {
             skip += fOutputBufferSize;
+            // TODO: Balance and progress may be less than minus one period.
             fOSSWriteOffset += progress;
         } else if (write_length < fEngineControl->fBufferSize) {
             skip += (fEngineControl->fBufferSize - write_length) * fOutSampleSize * fPlaybackChannels;
@@ -1165,38 +1164,42 @@ int JackOSSDriver::Write()
     gCycleTable.fTable[gCycleCount].fBeforeWrite = GetMicroSeconds();
 #endif
 
-    if (skip < fOutputBufferSize) {
-        count = ::write(fOutFD, ((char*)fOutputBuffer) + skip, fOutputBufferSize - skip);
-    } else {
-        skip = fOutputBufferSize;
-        count = 0;
+    // Try multiple times in case of short writes.
+    ssize_t count = skip;
+    for (int i = 0; i < 3 && count < fOutputBufferSize; ++i) {
+        ssize_t ret = ::write(fOutFD, ((char*)fOutputBuffer) + count, fOutputBufferSize - count);
+        if (ret < 0) {
+            jack_log("JackOSSDriver::Write error = %s", strerror(errno));
+            return -1;
+        }
+        count += ret;
     }
 
-    if (count > 0) {
-        fOSSWriteOffset += (count / (fOutSampleSize * fPlaybackChannels));
-    }
+    fOSSWriteOffset += ((count - skip) / (fOutSampleSize * fPlaybackChannels));
 
 #ifdef JACK_MONITOR
-    if (count > 0 && count != (int)(fOutputBufferSize - skip))
-        jack_log("JackOSSDriver::Write count = %ld", count / (fOutSampleSize * fPlaybackChannels));
+    if (count > 0 && count != (int)fOutputBufferSize)
+        jack_log("JackOSSDriver::Write count = %ld", (count - skip) / (fOutSampleSize * fPlaybackChannels));
     gCycleTable.fTable[gCycleCount].fAfterWrite = GetMicroSeconds();
     gCycleCount = (gCycleCount == CYCLE_POINTS - 1) ? gCycleCount: gCycleCount + 1;
 #endif
 
     static unsigned int sample_count = 0;
     if (count > 0) {
-        sample_count += count / (fOutSampleSize * fPlaybackChannels);
+        sample_count += (count - skip) / (fOutSampleSize * fPlaybackChannels);
     }
     static unsigned int cycle_count = 0;
     if (++cycle_count % 1000 == 0) {
         jack_info("JackOSSDriver::Write total played samples = %ld", sample_count);
     }
 
-    // XRun detection
+    // Check and clear OSS errors.
+    audio_errinfo ei_out;
     if (ioctl(fOutFD, SNDCTL_DSP_GETERROR, &ei_out) == 0) {
 
+        // Not reliable for underrun detection, virtual_oss does not implement it.
         if (ei_out.play_underruns > 0) {
-            jack_error("JackOSSDriver::Write underruns = %d", ei_out.play_underruns);
+            jack_error("JackOSSDriver::Write %d underrun events", ei_out.play_underruns);
         }
 
         if (ei_out.play_errorcount > 0 && ei_out.play_lasterror != 0) {
@@ -1204,15 +1207,12 @@ int JackOSSDriver::Write()
         }
     }
 
-    if (count < 0) {
-        jack_log("JackOSSDriver::Write error = %s", strerror(errno));
+    if (count < (int)fOutputBufferSize) {
+        jack_error("JackOSSDriver::Write incomplete write of %ld bytes", count - skip);
         return -1;
-    } else if (count < (int)(fOutputBufferSize - skip)) {
-        jack_error("JackOSSDriver::Write error bytes written = %ld", count);
-        return -1;
-    } else {
-        return 0;
     }
+
+    return 0;
 }
 
 int JackOSSDriver::SetBufferSize(jack_nframes_t buffer_size)
