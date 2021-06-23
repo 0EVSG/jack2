@@ -456,6 +456,7 @@ int JackOSSDriver::WriteSilence(jack_nframes_t frames)
 
 int JackOSSDriver::WaitAndSync()
 {
+    oss_count_t ptr = {0, 0, {0}};
     if (fInFD > 0 && fOSSReadSync != 0) {
         if (fOSSReadOffset + fEngineControl->fBufferSize > 0) {
             jack_nframes_t frames = fOSSReadOffset + fEngineControl->fBufferSize;
@@ -498,7 +499,6 @@ int JackOSSDriver::WaitAndSync()
         }
         if (poll_fd[0].revents & POLLIN) {
             // Check the excess recording frames.
-            oss_count_t ptr;
             if (ioctl(fInFD, SNDCTL_DSP_CURRENT_IPTR, &ptr) != -1 && ptr.fifo_samples >= 0) {
                 if (fInBlockSize <= 1) {
                     // Irregular block size, let sync time converge slowly when late.
@@ -531,7 +531,6 @@ int JackOSSDriver::WaitAndSync()
         }
         if (poll_fd[1].revents & POLLOUT) {
             // Check the remaining playback frames.
-            oss_count_t ptr;
             if (ioctl(fOutFD, SNDCTL_DSP_CURRENT_OPTR, &ptr) != -1 && ptr.fifo_samples >= 0) {
                 if (fOutBlockSize <= 1) {
                     // Irregular block size, let sync time converge slowly when late.
@@ -579,6 +578,15 @@ int JackOSSDriver::WaitAndSync()
         // Force balancing if buffer is badly balanced.
         fForceBalancing = fForceBalancing || (abs(fBufferBalance) > max(fInMeanStep, fOutMeanStep));
     }
+
+    // Print debug info every 10 seconds.
+    if (ptr.samples > 0 && (ptr.samples % (10 * fEngineControl->fSampleRate)) < fEngineControl->fBufferSize) {
+        jack_info("JackOSSDriver::Read buffer balance is %ld", fBufferBalance);
+        jack_time_t now = GetMicroSeconds();
+        jack_info("JackOSSDriver::Read recording offset %ld sync %ld ago", fOSSReadOffset, now - fOSSReadSync);
+        jack_info("JackOSSDriver::Read playback offset %ld sync %ld ago", fOSSWriteOffset, now - fOSSWriteSync);
+    }
+
     return 0;
 }
 
@@ -1046,26 +1054,6 @@ int JackOSSDriver::Read()
         fOSSReadOffset += count / (fInSampleSize * fCaptureChannels);
     }
 
-    static unsigned int sample_count = 0;
-    if (count > 0) {
-        sample_count += count / (fInSampleSize * fCaptureChannels);
-    }
-    static unsigned int cycle_count = 0;
-    if (++cycle_count % 1000 == 0) {
-        jack_info("JackOSSDriver::Read buffer balance is %ld", fBufferBalance);
-        oss_count_t ptr;
-        if (ioctl(fInFD, SNDCTL_DSP_CURRENT_IPTR, &ptr) != -1) {
-            jack_info("JackOSSDriver::Read recording samples = %ld, fifo_samples = %d", ptr.samples, ptr.fifo_samples);
-        }
-        if (fOutFD > 0 && ioctl(fOutFD, SNDCTL_DSP_CURRENT_OPTR, &ptr) != -1) {
-            jack_info("JackOSSDriver::Read playback samples = %ld, fifo_samples = %d", ptr.samples, ptr.fifo_samples);
-        }
-        jack_time_t now = GetMicroSeconds();
-        jack_info("JackOSSDriver::Read recording offset %ld sync %ld ago", fOSSReadOffset, now - fOSSReadSync);
-        jack_info("JackOSSDriver::Read playback offset %ld sync %ld ago", fOSSWriteOffset, now - fOSSWriteSync);
-        jack_info("JackOSSDriver::Read total recorded samples = %ld", sample_count);
-    }
-
 #ifdef JACK_MONITOR
     if (count > 0 && count != (int)fInputBufferSize)
         jack_log("JackOSSDriver::Read count = %ld", count / (fInSampleSize * fCaptureChannels));
@@ -1186,15 +1174,6 @@ int JackOSSDriver::Write()
     gCycleTable.fTable[gCycleCount].fAfterWrite = GetMicroSeconds();
     gCycleCount = (gCycleCount == CYCLE_POINTS - 1) ? gCycleCount: gCycleCount + 1;
 #endif
-
-    static unsigned int sample_count = 0;
-    if (count > 0) {
-        sample_count += (count - skip) / (fOutSampleSize * fPlaybackChannels);
-    }
-    static unsigned int cycle_count = 0;
-    if (++cycle_count % 1000 == 0) {
-        jack_info("JackOSSDriver::Write total played samples = %ld", sample_count);
-    }
 
     // Check and clear OSS errors.
     audio_errinfo ei_out;
