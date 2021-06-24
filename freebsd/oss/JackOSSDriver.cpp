@@ -1112,8 +1112,6 @@ int JackOSSDriver::Write()
             overdue = consumed - fOSSWriteOffset - tolerance;
             jack_error("JackOSSDriver::Write underrun, late by %ld, skip %ld frames", passed - fOSSWriteOffset, overdue);
             jack_error("JackOSSDriver::Write playback offset %ld frames synced %ld us ago", fOSSWriteOffset, now - fOSSWriteSync);
-            // TODO: Is it necessary to notify for write underruns?
-            NotifyXRun(now, float(FramesToTime(overdue, fEngineControl->fSampleRate)));
             // Also consider buffer balance, there was a gap in playback anyway.
             fForceBalancing = true;
         }
