@@ -477,13 +477,13 @@ int JackOSSDriver::WaitAndSync()
     // Poll until recording and playback buffer are ready for this cycle.
     pollfd poll_fd[2];
     poll_fd[0].fd = fInFD;
-    if (fInFD > 0 && poll_start < fOSSReadSync) {
+    if (fInFD > 0 && (fForceSync || poll_start < fOSSReadSync)) {
         poll_fd[0].events = POLLIN;
     } else {
         poll_fd[0].events = 0;
     }
     poll_fd[1].fd = fOutFD;
-    if (fOutFD > 0 && fOSSWriteSync != 0 && poll_start < fOSSWriteSync) {
+    if (fOutFD > 0 && (fForceSync || poll_start < fOSSWriteSync)) {
         poll_fd[1].events = POLLOUT;
     } else {
         poll_fd[1].events = 0;
@@ -844,7 +844,6 @@ int JackOSSDriver::Open(jack_nframes_t nframes,
     fExtraCaptureLatency = capture_latency;
     fExtraPlaybackLatency = playback_latency;
 
-    //! \todo Test latencies in asynchronous mode.
     // Additional playback latency introduced by the OSS buffer. The extra hardware
     // latency given by the user should then be symmetric as reported by jack_iodelay.
     playback_latency += user_nperiods * nframes;
@@ -935,6 +934,7 @@ int JackOSSDriver::OpenAux()
     fOSSReadOffset = fOSSWriteOffset = 0;
     fBufferBalance = 0;
     fForceBalancing = false;
+    fForceSync = false;
 
     if (fCapture && (OpenInput() < 0)) {
         return -1;
@@ -1041,6 +1041,12 @@ int JackOSSDriver::Read()
     // Read offset accounting and overrun detection.
     if (count > 0) {
         jack_time_t now = GetMicroSeconds();
+        jack_time_t sync = max(fOSSReadSync, fOSSWriteSync);
+        if (now - sync > 1000) {
+            // Blocking read() may indicate sample loss in OSS - force resync.
+            jack_error("JackOSSDriver::Read long read duration of %ld us", now - sync);
+            fForceSync = true;
+        }
         long long passed = TimeToFrames(now - fOSSReadSync, fEngineControl->fSampleRate);
         passed -= (passed % fInBlockSize);
         if (passed > fOSSReadOffset + fOSSInBuffer) {
@@ -1099,11 +1105,11 @@ int JackOSSDriver::Write()
     }
 
     unsigned int skip = 0;
+    jack_time_t start = GetMicroSeconds();
 
     if (fOSSWriteSync > 0) {
-        jack_time_t now = GetMicroSeconds();
         // Check for underruns, rounded to hardware block size if available.
-        long long passed = TimeToFrames(now - fOSSWriteSync, fEngineControl->fSampleRate);
+        long long passed = TimeToFrames(start - fOSSWriteSync, fEngineControl->fSampleRate);
         long long consumed = passed - (passed % fOutBlockSize);
         long long tolerance = (fOutBlockSize > 1) ? 0 : fOutMeanStep;
         long long overdue = 0;
@@ -1111,7 +1117,7 @@ int JackOSSDriver::Write()
             // Skip playback data that already passed.
             overdue = consumed - fOSSWriteOffset - tolerance;
             jack_error("JackOSSDriver::Write underrun, late by %ld, skip %ld frames", passed - fOSSWriteOffset, overdue);
-            jack_error("JackOSSDriver::Write playback offset %ld frames synced %ld us ago", fOSSWriteOffset, now - fOSSWriteSync);
+            jack_error("JackOSSDriver::Write playback offset %ld frames synced %ld us ago", fOSSWriteOffset, start - fOSSWriteSync);
             // Also consider buffer balance, there was a gap in playback anyway.
             fForceBalancing = true;
         }
@@ -1120,8 +1126,8 @@ int JackOSSDriver::Write()
         if (fForceBalancing) {
             fForceBalancing = false;
             progress = max(progress + fBufferBalance, 0LL);
-            jack_info("JackOSSDriver::Write recording offset %ld sync %ld ago", fOSSReadOffset, now - fOSSReadSync);
-            jack_info("JackOSSDriver::Write playback offset %ld sync %ld ago", fOSSWriteOffset, now - fOSSWriteSync);
+            jack_info("JackOSSDriver::Write recording offset %ld sync %ld ago", fOSSReadOffset, start - fOSSReadSync);
+            jack_info("JackOSSDriver::Write playback offset %ld sync %ld ago", fOSSWriteOffset, start - fOSSWriteSync);
             jack_info("JackOSSDriver::Write buffer balancing %ld", fBufferBalance);
         }
         // How many samples to skip or prepend due to underrun and balancing.
@@ -1165,6 +1171,13 @@ int JackOSSDriver::Write()
     }
 
     fOSSWriteOffset += ((count - skip) / (fOutSampleSize * fPlaybackChannels));
+
+    jack_time_t duration = GetMicroSeconds() - start;
+    if (duration > 1000) {
+        // Blocking write() may indicate sample loss in OSS - force resync.
+        jack_error("JackOSSDriver::Write long write duration of %ld us", duration);
+        fForceSync = true;
+    }
 
 #ifdef JACK_MONITOR
     if (count > 0 && count != (int)fOutputBufferSize)
