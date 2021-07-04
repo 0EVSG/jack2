@@ -347,9 +347,13 @@ int JackOSSDriver::ProbeInBlockSize()
         }
 
         if (fInBlockSize > fEngineControl->fBufferSize / 2) {
-            //! \todo Fail if mean step > period.
             jack_info("JackOSSDriver::ProbeInBlockSize less than two hardware blocks per cycle");
             jack_info("JackOSSDriver::ProbeInBlockSize for best results make period a multiple of %d", fInBlockSize);
+        }
+
+        if (fInMeanStep > fEngineControl->fBufferSize) {
+            jack_error("JackOSSDriver::ProbeInBlockSize period is too small, hardware blocks of %d frames", fInMeanStep);
+            return -1;
         }
     }
 
@@ -422,9 +426,13 @@ int JackOSSDriver::ProbeOutBlockSize()
         }
 
         if (fOutBlockSize > fEngineControl->fBufferSize / 2) {
-            //! \todo Fail if mean step > period.
             jack_info("JackOSSDriver::ProbeOutBlockSize less than two hardware blocks per cycle");
             jack_info("JackOSSDriver::ProbeOutBlockSize for best results make period a multiple of %d", fOutBlockSize);
+        }
+
+        if (fOutMeanStep > fEngineControl->fBufferSize) {
+            jack_error("JackOSSDriver::ProbeOutBlockSize period is too small, hardware blocks of %d frames", fOutMeanStep);
+            return -1;
         }
     }
 
