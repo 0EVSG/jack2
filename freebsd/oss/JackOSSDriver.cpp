@@ -298,26 +298,22 @@ int JackOSSDriver::ProbeInBlockSize()
     if (fInFD > 0) {
         // Read one frame into a new hardware block so we can check its size.
         // Repeat that for multiple probes, sometimes the first reads differ.
-        ssize_t bytes = 1 * fInSampleSize * fCaptureChannels;
-        for (int p = 0; p < 8 && bytes > 0; ++p) {
-            //! \todo Prevent read out of bounds - separate method.
-            ssize_t count = ::read(fInFD, fInputBuffer, bytes);
-            if (count < 0) {
-                // Read error - abort.
-                jack_error("JackOSSDriver::ProbeInBlockSize read failed with %d", ret);
-                ret = count;
-                break;
-            }
-            bytes -= count;
-            if (bytes == 0) {
+        jack_nframes_t frames = 1;
+        for (int p = 0; p < 8 && frames > 0; ++p) {
+            ret = Discard(frames);
+            frames = 0;
+            if (ret == 0) {
                 oss_count_t ptr;
                 if (ioctl(fInFD, SNDCTL_DSP_CURRENT_IPTR, &ptr) == 0 && ptr.fifo_samples > 0) {
                     // Success, store probed hardware block size for later.
                     blocks[p] = 1U + ptr.fifo_samples;
                     ++probes;
                     // Proceed by reading one frame into the next hardware block.
-                    bytes = blocks[p] * fInSampleSize * fCaptureChannels;
+                    frames = blocks[p];
                 }
+            } else {
+                // Read error - abort.
+                jack_error("JackOSSDriver::ProbeInBlockSize read failed with %d", ret);
             }
         }
 
@@ -435,6 +431,27 @@ int JackOSSDriver::ProbeOutBlockSize()
     return ret;
 }
 
+int JackOSSDriver::Discard(jack_nframes_t frames)
+{
+    if (fInFD < 0) {
+        return -1;
+    }
+
+    // Read frames from OSS capture buffer to be discarded.
+    ssize_t size = frames * fInSampleSize * fCaptureChannels;
+    while (size > 0) {
+        ssize_t chunk = (size > fInputBufferSize) ? fInputBufferSize : size;
+        ssize_t count = ::read(fInFD, fInputBuffer, chunk);
+        if (count <= 0) {
+            jack_error("JackOSSDriver::Discard error bytes read = %ld", count);
+            return -1;
+        }
+        fOSSReadOffset += count / (fInSampleSize * fCaptureChannels);
+        size -= count;
+    }
+    return 0;
+}
+
 int JackOSSDriver::WriteSilence(jack_nframes_t frames)
 {
     if (fOutFD < 0) {
@@ -443,7 +460,7 @@ int JackOSSDriver::WriteSilence(jack_nframes_t frames)
 
     // Prefill OSS playback buffer, write some periods of silence.
     memset(fOutputBuffer, 0, fOutputBufferSize);
-    unsigned int size = frames * fOutSampleSize * fPlaybackChannels;
+    ssize_t size = frames * fOutSampleSize * fPlaybackChannels;
     while (size > 0) {
         ssize_t chunk = (size > fOutputBufferSize) ? fOutputBufferSize : size;
         ssize_t count = ::write(fOutFD, fOutputBuffer, chunk);
@@ -989,11 +1006,7 @@ int JackOSSDriver::Read()
         discard -= min(TimeToFrames(1000, fEngineControl->fSampleRate), (fInMeanStep / 2));
         jack_info("JackOSSDriver::Read start recording discard %ld frames", discard);
         fOSSReadSync = GetMicroSeconds();
-        //! \todo Read out of bounds - use chunks in a separate method.
-        ssize_t count = ::read(fInFD, fInputBuffer, discard * fInSampleSize * fCaptureChannels);
-        if (count > 0) {
-            fOSSReadOffset += count / (fInSampleSize * fCaptureChannels);
-        }
+        Discard(discard);
 
         fForceBalancing = true;
     }
