@@ -300,6 +300,7 @@ int JackOSSDriver::ProbeInBlockSize()
         // Repeat that for multiple probes, sometimes the first reads differ.
         ssize_t bytes = 1 * fInSampleSize * fCaptureChannels;
         for (int p = 0; p < 8 && bytes > 0; ++p) {
+            //! \todo Prevent read out of bounds - separate method.
             ssize_t count = ::read(fInFD, fInputBuffer, bytes);
             if (count < 0) {
                 // Read error - abort.
@@ -350,6 +351,7 @@ int JackOSSDriver::ProbeInBlockSize()
         }
 
         if (fInBlockSize > fEngineControl->fBufferSize / 2) {
+            //! \todo Fail if mean step > period.
             jack_info("JackOSSDriver::ProbeInBlockSize less than two hardware blocks per cycle");
             jack_info("JackOSSDriver::ProbeInBlockSize for best results make period a multiple of %d", fInBlockSize);
         }
@@ -424,6 +426,7 @@ int JackOSSDriver::ProbeOutBlockSize()
         }
 
         if (fOutBlockSize > fEngineControl->fBufferSize / 2) {
+            //! \todo Fail if mean step > period.
             jack_info("JackOSSDriver::ProbeOutBlockSize less than two hardware blocks per cycle");
             jack_info("JackOSSDriver::ProbeOutBlockSize for best results make period a multiple of %d", fOutBlockSize);
         }
