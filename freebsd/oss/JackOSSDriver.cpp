@@ -972,7 +972,7 @@ void JackOSSDriver::CloseAux()
 int JackOSSDriver::Read()
 {
     if (fInFD > 0 && fOSSReadSync == 0) {
-        // Account for leftover samples from previous reads.
+        // First cycle, account for leftover samples from previous reads.
         fOSSReadOffset = 0;
         oss_count_t ptr;
         if (ioctl(fInFD, SNDCTL_DSP_CURRENT_IPTR, &ptr) == 0 && ptr.fifo_samples > 0) {
@@ -980,10 +980,13 @@ int JackOSSDriver::Read()
             fOSSReadOffset = -ptr.fifo_samples;
         }
 
-        // First cycle, start capture by reading halfway into a hardware block.
-        jack_nframes_t discard = (fInMeanStep / 2) - fOSSReadOffset;
+        // Start capture by reading a new hardware block.,
+        jack_nframes_t discard =  fInMeanStep - fOSSReadOffset;
+        // Let half a block or at most 1ms remain in buffer, avoid drift issues at start.
+        discard -= min(TimeToFrames(1000, fEngineControl->fSampleRate), (fInMeanStep / 2));
         jack_info("JackOSSDriver::Read start recording discard %ld frames", discard);
         fOSSReadSync = GetMicroSeconds();
+        //! \todo Read out of bounds - use chunks in a separate method.
         ssize_t count = ::read(fInFD, fInputBuffer, discard * fInSampleSize * fCaptureChannels);
         if (count > 0) {
             fOSSReadOffset += count / (fInSampleSize * fCaptureChannels);
@@ -993,7 +996,7 @@ int JackOSSDriver::Read()
     }
 
     if (fOutFD > 0 && fOSSWriteSync == 0) {
-        // Account for leftover samples from previous writes.
+        // First cycle, account for leftover samples from previous writes.
         fOSSWriteOffset = 0;
         oss_count_t ptr;
         if (ioctl(fOutFD, SNDCTL_DSP_CURRENT_OPTR, &ptr) == 0 && ptr.fifo_samples > 0) {
@@ -1001,9 +1004,10 @@ int JackOSSDriver::Read()
             fOSSWriteOffset = ptr.fifo_samples;
         }
 
-        // First cycle, start playback with silence.
+        // Start playback with silence, target latency as given by the user.
         jack_nframes_t silence = (fNperiods + 1) * fEngineControl->fBufferSize;
-        silence -= (fOutMeanStep / 2);
+        // Minus half a block or at most 1ms of frames, avoid drift issues at start.
+        silence -= min(TimeToFrames(1000, fEngineControl->fSampleRate), (fOutMeanStep / 2));
         silence = max(silence - fOSSWriteOffset, 1LL);
         jack_info("JackOSSDriver::Read start playback with %ld frames of silence", silence);
         fOSSWriteSync = GetMicroSeconds();
