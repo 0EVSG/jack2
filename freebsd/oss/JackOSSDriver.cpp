@@ -539,8 +539,8 @@ int JackOSSDriver::WaitAndSync()
                         jack_info("JackOSSDriver::WaitAndSync capture %ld sync %ld early", fOSSReadOffset, fOSSReadSync - now);
                         fOSSReadSync = now;
                     }
-                } else if (fForceBalancing) {
-                    // First cycle, just use sync time directly.
+                } else if (fForceSync) {
+                    // Uncertain previous sync, just use sync time directly.
                     fOSSReadSync = now;
                     fOSSReadOffset = -ptr.fifo_samples;
                 } else {
@@ -571,8 +571,8 @@ int JackOSSDriver::WaitAndSync()
                         jack_info("JackOSSDriver::WaitAndSync playback %ld sync %ld early", fOSSWriteOffset, fOSSWriteSync - now);
                         fOSSWriteSync = now;
                     }
-                } else if (fForceBalancing) {
-                    // First cycle, just use sync time directly.
+                } else if (fForceSync) {
+                    // Uncertain previous sync, just use sync time directly.
                     fOSSWriteSync = now;
                     fOSSWriteOffset = ptr.fifo_samples;
                 } else {
@@ -590,6 +590,8 @@ int JackOSSDriver::WaitAndSync()
             poll_fd[1].events = 0;
         }
     }
+
+    fForceSync = false;
 
     // Compute balance of read and write buffers combined.
     fBufferBalance = 0;
@@ -1016,6 +1018,7 @@ int JackOSSDriver::Read()
         fOSSReadSync = GetMicroSeconds();
         Discard(discard);
 
+        fForceSync = true;
         fForceBalancing = true;
     }
 
@@ -1037,6 +1040,7 @@ int JackOSSDriver::Read()
         fOSSWriteSync = GetMicroSeconds();
         WriteSilence(silence);
 
+        fForceSync = true;
         fForceBalancing = true;
     }
 
