@@ -1060,7 +1060,7 @@ int JackOSSDriver::Read()
     for (int i = 0; i < 3 && count < fInputBufferSize; ++i) {
         ssize_t ret = ::read(fInFD, ((char*)fInputBuffer) + count, fInputBufferSize - count);
         if (ret < 0) {
-            jack_log("JackOSSDriver::Read error = %s", strerror(errno));
+            jack_error("JackOSSDriver::Read error = %s", strerror(errno));
             return -1;
         }
         count += ret;
@@ -1072,7 +1072,7 @@ int JackOSSDriver::Read()
         jack_time_t sync = max(fOSSReadSync, fOSSWriteSync);
         if (now - sync > 1000) {
             // Blocking read() may indicate sample loss in OSS - force resync.
-            jack_error("JackOSSDriver::Read long read duration of %ld us", now - sync);
+            jack_log("JackOSSDriver::Read long read duration of %ld us", now - sync);
             fForceSync = true;
         }
         long long passed = TimeToFrames(now - fOSSReadSync, fEngineControl->fSampleRate);
@@ -1192,7 +1192,7 @@ int JackOSSDriver::Write()
     for (int i = 0; i < 3 && count < fOutputBufferSize; ++i) {
         ssize_t ret = ::write(fOutFD, ((char*)fOutputBuffer) + count, fOutputBufferSize - count);
         if (ret < 0) {
-            jack_log("JackOSSDriver::Write error = %s", strerror(errno));
+            jack_error("JackOSSDriver::Write error = %s", strerror(errno));
             return -1;
         }
         count += ret;
@@ -1203,7 +1203,7 @@ int JackOSSDriver::Write()
     jack_time_t duration = GetMicroSeconds() - start;
     if (duration > 1000) {
         // Blocking write() may indicate sample loss in OSS - force resync.
-        jack_error("JackOSSDriver::Write long write duration of %ld us", duration);
+        jack_log("JackOSSDriver::Write long write duration of %ld us", duration);
         fForceSync = true;
     }
 
