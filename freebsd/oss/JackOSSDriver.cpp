@@ -486,6 +486,7 @@ int JackOSSDriver::WaitAndSync()
 {
     oss_count_t ptr = {0, 0, {0}};
     if (fInFD > 0 && fOSSReadSync != 0) {
+        // Predict time of next capture sync (poll() return).
         if (fOSSReadOffset + fEngineControl->fBufferSize > 0) {
             jack_nframes_t frames = fOSSReadOffset + fEngineControl->fBufferSize;
             jack_nframes_t rounded = RoundUp(frames, fInBlockSize);
@@ -494,6 +495,7 @@ int JackOSSDriver::WaitAndSync()
         }
     }
     if (fOutFD > 0 && fOSSWriteSync != 0) {
+        // Predict time of next playback sync (poll() return).
         if (fOSSWriteOffset > fNperiods * fEngineControl->fBufferSize) {
             jack_nframes_t frames = fOSSWriteOffset - fNperiods * fEngineControl->fBufferSize;
             jack_nframes_t rounded = RoundUp(frames, fOutBlockSize);
