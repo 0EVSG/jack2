@@ -54,6 +54,8 @@ class JackOSSDriver : public JackAudioDriver
         bool fExcl;
         bool fIgnoreHW;
 
+        std::int64_t fCycleEnd;
+
         unsigned int fInSampleSize;
         unsigned int fOutSampleSize;
 
@@ -79,6 +81,7 @@ class JackOSSDriver : public JackAudioDriver
                 : JackAudioDriver(name, alias, engine, table),
                 fBits(0),
                 fNperiods(0), fCapture(false), fPlayback(false), fExcl(false), fIgnoreHW(true),
+                fCycleEnd(0),
                 fInSampleSize(0), fOutSampleSize(0),
                 fInputBufferSize(0), fOutputBufferSize(0)
         {}

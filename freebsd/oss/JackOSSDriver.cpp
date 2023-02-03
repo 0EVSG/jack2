@@ -428,6 +428,7 @@ int JackOSSDriver::Close()
 int JackOSSDriver::OpenAux()
 {
     // (Re-)Initialize runtime variables.
+    fCycleEnd = 0;
     fInSampleSize = fOutSampleSize = 0;
     fInputBufferSize = fOutputBufferSize = 0;
 
@@ -468,6 +469,10 @@ int JackOSSDriver::Read()
         return -1;
     }
 
+    // TODO: Check time for over- and underruns.
+    // Mark the end time of this cycle, in frames.
+    fCycleEnd += fEngineControl->fBufferSize;
+
     // Keep begin cycle time
     JackDriver::CycleTakeBeginTime();
 
@@ -490,8 +495,7 @@ int JackOSSDriver::Read()
         }
     }
 
-    // TODO: Set end frame correctly.
-    fReadChannel.set_buffer(std::move(buffer), 0);
+    fReadChannel.set_buffer(std::move(buffer), fCycleEnd + fEngineControl->fBufferSize);
 
 #ifdef JACK_MONITOR
     gCycleTable.fTable[gCycleCount].fAfterReadConvert = GetMicroSeconds();
@@ -521,8 +525,7 @@ int JackOSSDriver::Write()
         }
     }
 
-    // TODO: Set end frame correctly.
-    fWriteChannel.set_buffer(std::move(buffer), 0);
+    fWriteChannel.set_buffer(std::move(buffer), fCycleEnd + fEngineControl->fBufferSize);
 
 #ifdef JACK_MONITOR
     gCycleTable.fTable[gCycleCount].fBeforeWrite = GetMicroSeconds();
