@@ -56,6 +56,7 @@ public:
     out_buffer = Buffer(out_buffer_data.data(), out_buffer_data.size());
     _out.set_buffer(std::move(out_buffer), out_frames);
     _out.request_sync(4);
+    _out.set_target_latency(period);
     // Step is 16 frames at 48kHz and lower, 32 at 96kHz, 64 at 192kHz.
     if (_out.stepping() != _out.stepping() ||
         _in.sample_rate() != _out.sample_rate()) {
@@ -134,8 +135,8 @@ private:
     if (!_in.process(_sync_frames) || !_out.process(_sync_frames)) {
       return false;
     }
-    //    _in.log_state(_sync_frames);
-    //    _out.log_state(_sync_frames);
+    _in.log_state(_sync_frames);
+    _out.log_state(_sync_frames);
     return true;
   }
 

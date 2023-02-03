@@ -20,6 +20,15 @@ public:
     return Device::open(device, mode);
   }
 
+  void set_target_latency(std::int64_t latency = 0) {
+    latency = std::max(latency, max_progress());
+    if (latency > _target_latency) {
+      _target_latency = latency;
+      Log::info(SOSSO_LOC, "Recording target latency extended to %lld.",
+                _target_latency);
+    }
+  }
+
   bool process(Buffer &buffer, std::int64_t end, std::int64_t now) {
     std::int64_t offset = buffer_offset(buffer.remaining(), end);
     if (offset < 0) {
@@ -62,11 +71,7 @@ public:
                 erased / frame_size());
       offset -= erased / frame_size();
     }
-    if (max_progress() > _target_latency) {
-      _target_latency = max_progress();
-      Log::info(SOSSO_LOC, "In target latency extended to %lld.",
-                _target_latency);
-    }
+    set_target_latency();
     return true;
   }
 

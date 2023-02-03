@@ -18,16 +18,21 @@ public:
     if (exclusive) {
       mode |= O_EXCL;
     }
-    return Device::open(device, mode);
+    bool ok = Device::open(device, mode);
+    _oss_available = buffer_frames();
+    return ok;
+  }
+
+  void set_target_latency(std::int64_t latency = 0) {
+    latency = std::max(latency, max_progress());
+    if (latency > _target_latency) {
+      _target_latency = latency;
+      Log::info(SOSSO_LOC, "Playback target latency extended to %lld.",
+                _target_latency);
+    }
   }
 
   bool process(Buffer &buffer, std::int64_t end, std::int64_t now) {
-    if (_latency_target == 0) {
-      // First call to process, use buffer length as latency target.
-      _latency_target = buffer.length() / frame_size();
-      _oss_available = buffer_frames();
-      Log::info(SOSSO_LOC, "Latency target is %lld frames.", _latency_target);
-    }
     std::size_t write_limit = buffer.remaining();
     std::int64_t offset = buffer_offset(buffer.remaining(), end);
     if (offset > 0) {
@@ -62,6 +67,7 @@ public:
     if (_ignore > 0 && now >= end) {
       buffer.advance(buffer.remaining());
     }
+    set_target_latency();
     return true;
   }
 
@@ -69,7 +75,7 @@ private:
   std::int64_t buffer_offset(std::size_t remaining, std::int64_t end) {
     std::int64_t position = end - (remaining / frame_size());
     std::int64_t processed = _last_progress + buffer_frames() - oss_available();
-    std::int64_t offset = position + _latency_target - processed;
+    std::int64_t offset = position + _target_latency - processed;
     return offset;
   }
 
@@ -77,9 +83,9 @@ private:
     // To handle irregular initial progress, restrict write to latency target.
     if (_ignore > 0) {
       std::int64_t queued = buffer_frames() - _oss_available;
-      if (queued < _latency_target) {
+      if (queued < _target_latency) {
         // Write at most latency target frames to OSS queue.
-        limit = std::min(limit, (_latency_target - queued) * frame_size());
+        limit = std::min(limit, (_target_latency - queued) * frame_size());
       } else {
         // Skip write.
         limit = 0;
@@ -130,7 +136,7 @@ private:
     return true;
   }
 
-  std::int64_t _latency_target = 0;
+  std::int64_t _target_latency = 0;
 };
 
 } // namespace sosso

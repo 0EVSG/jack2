@@ -59,6 +59,10 @@ int GetSampleFormat(int bits)
 
 }
 
+void sosso::Log::log(sosso::SourceLocation location, const char* message) {
+    jack_log(message);
+}
+
 void sosso::Log::info(sosso::SourceLocation location, const char* message) {
     jack_info(message);
 }

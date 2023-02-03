@@ -27,12 +27,23 @@ struct SourceLocation {
 #define SOSSO_LOC                                                              \
   SourceLocation { __LINE__, 0, __FILE__, __func__ }
 
+#define SOSSO_LOG(...) Log::log(SOURCE_LOC, __VA_ARGS__)
+
 #define SOSSO_INFO(...) Log::info(SOURCE_LOC, __VA_ARGS__)
 
 #define SOSSO_WARN(...) Log::warn(SOURCE_LOC, __VA_ARGS__)
 
 class Log {
 public:
+  static void log(SourceLocation location, const char *message);
+
+  template <typename... Args>
+  static void log(SourceLocation location, const char *message, Args... args) {
+    char formatted[256];
+    std::snprintf(formatted, 256, message, args...);
+    log(location, formatted);
+  }
+
   static void info(SourceLocation location, const char *message);
 
   template <typename... Args>
