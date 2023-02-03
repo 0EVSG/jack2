@@ -263,6 +263,8 @@ int JackOSSDriver::OpenInput()
         jack_info("JackOSSDriver::OpenInput driver forced the number of capture channels %ld", fCaptureChannels);
     }
 
+    fReadChannel.set_target_latency(0);
+
     // Internal buffer size required for one period.
     fInputBufferSize = fEngineControl->fBufferSize * fReadChannel.frame_size();
 
@@ -303,8 +305,10 @@ int JackOSSDriver::OpenOutput()
         jack_info("JackOSSDriver::OpenOutput driver forced the number of playback channels %ld", fPlaybackChannels);
     }
 
+    fWriteChannel.set_target_latency(fEngineControl->fBufferSize);
+
     // Internal buffer size required for one period.
-    fOutputBufferSize = fEngineControl->fBufferSize * fOutSampleSize * fPlaybackChannels;
+    fOutputBufferSize = fEngineControl->fBufferSize * fWriteChannel.frame_size();
 
     sosso::Buffer buffer((char*) calloc(fOutputBufferSize, 1), fOutputBufferSize);
     assert(buffer.data());
