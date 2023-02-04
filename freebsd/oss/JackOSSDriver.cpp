@@ -440,6 +440,16 @@ int JackOSSDriver::OpenAux()
         return -1;
     }
 
+    if (!fFrameClock.init_clock(fEngineControl->fSampleRate)) {
+        return -1;
+    }
+
+    // TODO: Improve correction limits for border cases.
+    std::int64_t limit = fEngineControl->fBufferSize / 2;
+    fCorrection.set_loss_limits(-limit, limit);
+    limit = limit / 2;
+    fCorrection.set_drift_limits(-limit, limit);
+
     DisplayDeviceInfo();
     return 0;
 }

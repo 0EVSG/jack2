@@ -22,7 +22,9 @@ Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 #define __JackOSSDriver__
 
 #include "JackAudioDriver.h"
+#include "sosso/Correction.hpp"
 #include "sosso/DoubleBuffer.hpp"
+#include "sosso/FrameClock.hpp"
 #include "sosso/ReadChannel.hpp"
 #include "sosso/WriteChannel.hpp"
 
@@ -64,6 +66,8 @@ class JackOSSDriver : public JackAudioDriver
         
         sosso::DoubleBuffer<sosso::ReadChannel> fReadChannel;
         sosso::DoubleBuffer<sosso::WriteChannel> fWriteChannel;
+        sosso::FrameClock fFrameClock;
+        sosso::Correction fCorrection;
 
         int OpenInput();
         int OpenOutput();
