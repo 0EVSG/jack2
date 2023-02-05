@@ -535,7 +535,12 @@ int JackOSSDriver::Write()
         }
     }
 
-    fWriteChannel.set_buffer(std::move(buffer), fCycleEnd + fEngineControl->fBufferSize);
+    // If both channels are used, correct drift relative to recording balance.
+    if (fReadChannel.recording()) {
+        fCorrection.correct(fWriteChannel.balance(), fReadChannel.balance());
+    }
+
+    fWriteChannel.set_buffer(std::move(buffer), fCycleEnd + fEngineControl->fBufferSize + fCorrection.correction());
 
 #ifdef JACK_MONITOR
     gCycleTable.fTable[gCycleCount].fBeforeWrite = GetMicroSeconds();
