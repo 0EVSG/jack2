@@ -75,7 +75,7 @@ class JackOSSDriver : public JackAudioDriver
         void CloseAux();
         void DisplayDeviceInfo();
         int WaitAndSync();
-        int CheckTimeAndRun();
+        int CheckTimeAndRun(std::int64_t &now);
 
     protected:
         virtual void UpdateLatencies();

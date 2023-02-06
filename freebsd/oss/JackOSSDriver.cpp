@@ -237,11 +237,6 @@ void JackOSSDriver::DisplayDeviceInfo()
     }
 }
 
-int JackOSSDriver::WaitAndSync()
-{
-    return 0;
-}
-
 int JackOSSDriver::OpenInput()
 {
     if (fCaptureChannels == 0) fCaptureChannels = 2;
@@ -469,10 +464,9 @@ void JackOSSDriver::CloseAux()
     }
 }
 
-int JackOSSDriver::CheckTimeAndRun()
+int JackOSSDriver::CheckTimeAndRun(std::int64_t &now)
 {
     // Check current frame time.
-    std::int64_t now = 0;
     if (fFrameClock.now(now)) {
         return -1;
     }
@@ -483,14 +477,18 @@ int JackOSSDriver::CheckTimeAndRun()
     if (fCapture && fReadChannel.recording()) {
         if ((fReadChannel.oss_available() > 0 && now > fReadChannel.last_processing()) ||
             now >= fReadChannel.wakeup_time(fReadChannel.last_processing())) {
-            fReadChannel.process(now);
+            if (fReadChannel.process(now)) {
+                return -1;
+            }
         }
     }
     // Process write channel if wakeup time passed, or OSS buffer space available.
     if (fPlayback && fWriteChannel.playback()) {
         if ((fWriteChannel.oss_available() > 0 && now > fWriteChannel.last_processing()) ||
             now >= fWriteChannel.wakeup_time(fWriteChannel.last_processing())) {
-            fWriteChannel.process(now);
+            if (fWriteChannel.process(now)) {
+                return -1;
+            }
         }
     }
 
@@ -503,13 +501,33 @@ int JackOSSDriver::Read()
     gCycleTable.fTable[gCycleCount].fBeforeRead = GetMicroSeconds();
 #endif
 
-    if (WaitAndSync() < 0) {
-        return -1;
-    }
-
     // TODO: Check time for over- and underruns.
     // Mark the end time of this cycle, in frames.
     fCycleEnd += fEngineControl->fBufferSize;
+
+    // Process read and write channels at least once.
+    std::int64_t now = 0;
+    if (CheckTimeAndRun(now) != 0) {
+        return -1;
+    }
+
+    // Wait and process channels until read, or else write, buffer is finished.
+    while ((fReadChannel.recording() && !fReadChannel.finished(now)) ||
+           (!fReadChannel.recording() && !fWriteChannel.finished(now))) {
+        std::int64_t wakeup;
+        if (fReadChannel.recording()) {
+            wakeup = fReadChannel.wakeup_time(now);
+            if (fWriteChannel.playback()) {
+                wakeup = std::min(wakeup, fWriteChannel.wakeup_time(now));
+            }
+        } else {
+            wakeup = fWriteChannel.wakeup_time(now);
+        }
+        fFrameClock.sleep(wakeup);
+        if (CheckTimeAndRun(now) != 0) {
+            return -1;
+        }
+    }
 
     // Keep begin cycle time
     JackDriver::CycleTakeBeginTime();
@@ -517,8 +535,6 @@ int JackOSSDriver::Read()
     if (!fReadChannel.recording()) {
         return 0;
     }
-
-    // Read recording data.
 
 #ifdef JACK_MONITOR
     gCycleTable.fTable[gCycleCount].fAfterRead = GetMicroSeconds();
@@ -539,7 +555,7 @@ int JackOSSDriver::Read()
     gCycleTable.fTable[gCycleCount].fAfterReadConvert = GetMicroSeconds();
 #endif
 
-    return 0;
+    return CheckTimeAndRun(now);
 }
 
 int JackOSSDriver::Write()
@@ -547,6 +563,32 @@ int JackOSSDriver::Write()
     if (!fWriteChannel.playback()) {
         return 0;
     }
+
+    // Process read and write channels at least once.
+    std::int64_t now = 0;
+    if (CheckTimeAndRun(now) != 0) {
+        return -1;
+    }
+
+    // Wait and process channels until write buffer is finished.
+    while (!fWriteChannel.finished(now)) {
+        std::int64_t wakeup;
+        if (fReadChannel.recording()) {
+            wakeup = fReadChannel.wakeup_time(now);
+            if (fWriteChannel.playback()) {
+                wakeup = std::min(wakeup, fWriteChannel.wakeup_time(now));
+            }
+        } else {
+            wakeup = fWriteChannel.wakeup_time(now);
+        }
+        fFrameClock.sleep(wakeup);
+        if (CheckTimeAndRun(now) != 0) {
+            return -1;
+        }
+    }
+
+    // Keep begin cycle time
+    JackDriver::CycleTakeBeginTime();
 
     // Do balance correction?
 
@@ -575,6 +617,9 @@ int JackOSSDriver::Write()
 #endif
 
     // Do a processing step here.
+    if (CheckTimeAndRun(now) != 0) {
+        return -1;
+    }
 
 #ifdef JACK_MONITOR
     gCycleTable.fTable[gCycleCount].fAfterWrite = GetMicroSeconds();
