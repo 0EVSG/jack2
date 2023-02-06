@@ -469,6 +469,34 @@ void JackOSSDriver::CloseAux()
     }
 }
 
+int JackOSSDriver::CheckTimeAndRun()
+{
+    // Check current frame time.
+    std::int64_t now = 0;
+    if (fFrameClock.now(now)) {
+        return -1;
+    }
+    // Round frame time down to steppings.
+    now = now - (now % fReadChannel.stepping());
+
+    // Process read channel if wakeup time passed, or OSS buffer data available.
+    if (fCapture && fReadChannel.recording()) {
+        if ((fReadChannel.oss_available() > 0 && now > fReadChannel.last_processing()) ||
+            now >= fReadChannel.wakeup_time(fReadChannel.last_processing())) {
+            fReadChannel.process(now);
+        }
+    }
+    // Process write channel if wakeup time passed, or OSS buffer space available.
+    if (fPlayback && fWriteChannel.playback()) {
+        if ((fWriteChannel.oss_available() > 0 && now > fWriteChannel.last_processing()) ||
+            now >= fWriteChannel.wakeup_time(fWriteChannel.last_processing())) {
+            fWriteChannel.process(now);
+        }
+    }
+
+    return 0;
+}
+
 int JackOSSDriver::Read()
 {
 #ifdef JACK_MONITOR

@@ -10,6 +10,8 @@ class Channel : public Device {
 public:
   std::int64_t last_sync() const { return _last_sync; }
 
+  std::int64_t last_processing() const { return _last_processing; }
+
   std::int64_t balance() const { return _balance; }
 
   std::int64_t next_min_progress() const {
