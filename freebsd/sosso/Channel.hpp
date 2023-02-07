@@ -8,6 +8,25 @@ namespace sosso {
 
 class Channel : public Device {
 public:
+  bool open(const char *device, int mode) {
+    // Reset all internal statistics from last run.
+    _last_processing = 0;
+    _last_sync = 0;
+    _last_progress = 0;
+    _balance = 0;
+    _min_progress = 0;
+    _max_progress = 0;
+    _oss_available = 0;
+    _total_loss = 0;
+    _sync_required = 0;
+    _ignore = 4;
+    bool ok = Device::open(device, mode);
+    if (playback()) {
+      _oss_available = buffer_frames();
+    }
+    return ok;
+  }
+
   std::int64_t last_sync() const { return _last_sync; }
 
   std::int64_t last_processing() const { return _last_processing; }

@@ -18,9 +18,7 @@ public:
     if (exclusive) {
       mode |= O_EXCL;
     }
-    bool ok = Device::open(device, mode);
-    _oss_available = buffer_frames();
-    return ok;
+    return Channel::open(device, mode);
   }
 
   void set_target_latency(std::int64_t latency = 0) {

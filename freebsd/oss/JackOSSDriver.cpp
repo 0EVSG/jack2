@@ -642,6 +642,7 @@ void JackOSSDriver::UpdateLatencies()
     }
 
     for (int i = 0; i < fPlaybackChannels; i++) {
+        // TODO: Move this half period to capture latency.
         output_range.max = (fEngineControl->fBufferSize / 2) + fPlaybackLatency;
         // Additional latency introduced by the OSS buffer.
         output_range.max += fNperiods * fEngineControl->fBufferSize;

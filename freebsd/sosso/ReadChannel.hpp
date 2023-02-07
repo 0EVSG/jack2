@@ -17,7 +17,7 @@ public:
     if (exclusive) {
       mode |= O_EXCL;
     }
-    return Device::open(device, mode);
+    return Channel::open(device, mode);
   }
 
   void set_target_latency(std::int64_t latency = 0) {
