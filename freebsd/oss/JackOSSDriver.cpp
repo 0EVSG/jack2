@@ -427,14 +427,30 @@ int JackOSSDriver::OpenAux()
     fInSampleSize = fOutSampleSize = 0;
     fInputBufferSize = fOutputBufferSize = 0;
 
-    if (fCapture && (OpenInput() < 0)) {
-        return -1;
+    int group_id = 0;
+
+    if (fCapture) {
+        if ((OpenInput() < 0)) {
+            return -1;
+        }
+        fReadChannel.add_to_sync_group(group_id);
     }
 
-    if (fPlayback && (OpenOutput() < 0)) {
-        return -1;
+    if (fPlayback) {
+        if ((OpenOutput() < 0)) {
+            return -1;
+        }
+        fWriteChannel.add_to_sync_group(group_id);
     }
 
+    // Start both channels in sync if available.
+    if (fCapture) {
+        fReadChannel.start_sync_group(group_id);
+    } else {
+        fWriteChannel.start_sync_group(group_id);
+    }
+
+    // Init frame clock here to mark start time.
     if (!fFrameClock.init_clock(fEngineControl->fSampleRate)) {
         return -1;
     }
