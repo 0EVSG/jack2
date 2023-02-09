@@ -517,7 +517,6 @@ int JackOSSDriver::Read()
     gCycleTable.fTable[gCycleCount].fBeforeRead = GetMicroSeconds();
 #endif
 
-    // TODO: Check time for over- and underruns.
     // Mark the end time of this cycle, in frames.
     fCycleEnd += fEngineControl->fBufferSize;
 
@@ -525,6 +524,11 @@ int JackOSSDriver::Read()
     std::int64_t now = 0;
     if (CheckTimeAndRun(now) != 0) {
         return -1;
+    }
+
+    // TODO: Check time for over- and underruns.
+    if (now > fCycleEnd + fEngineControl->fBufferSize) {
+      jack_error("JackOSSDriver::Read(): Late by %lld frames.", now - fCycleEnd);
     }
 
     // Wait and process channels until read, or else write, buffer is finished.
