@@ -484,6 +484,7 @@ int JackOSSDriver::CheckTimeAndRun(std::int64_t &now)
 {
     // Check current frame time.
     if (fFrameClock.now(now)) {
+        jack_error("JackOSSDriver::CheckTimeAndRun(): Frame clock failed.");
         return -1;
     }
     // Round frame time down to steppings.
@@ -494,6 +495,7 @@ int JackOSSDriver::CheckTimeAndRun(std::int64_t &now)
         if ((fReadChannel.oss_available() > 0 && now > fReadChannel.last_processing()) ||
             now >= fReadChannel.wakeup_time(fReadChannel.last_processing())) {
             if (fReadChannel.process(now)) {
+                jack_error("JackOSSDriver::CheckTimeAndRun(): Read process failed.");
                 return -1;
             }
         }
@@ -503,6 +505,7 @@ int JackOSSDriver::CheckTimeAndRun(std::int64_t &now)
         if ((fWriteChannel.oss_available() > 0 && now > fWriteChannel.last_processing()) ||
             now >= fWriteChannel.wakeup_time(fWriteChannel.last_processing())) {
             if (fWriteChannel.process(now)) {
+                jack_error("JackOSSDriver::CheckTimeAndRun(): Write process failed.");
                 return -1;
             }
         }
@@ -528,7 +531,7 @@ int JackOSSDriver::Read()
 
     // TODO: Check time for over- and underruns.
     if (now > fCycleEnd + fEngineControl->fBufferSize) {
-      jack_error("JackOSSDriver::Read(): Late by %lld frames.", now - fCycleEnd);
+        jack_error("JackOSSDriver::Read(): Late by %lld frames.", now - fCycleEnd);
     }
 
     // Wait and process channels until read, or else write, buffer is finished.
