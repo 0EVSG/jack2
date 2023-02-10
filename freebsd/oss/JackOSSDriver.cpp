@@ -559,6 +559,8 @@ int JackOSSDriver::Read()
         return 0;
     }
 
+    fReadChannel.log_state(now);
+
 #ifdef JACK_MONITOR
     gCycleTable.fTable[gCycleCount].fAfterRead = GetMicroSeconds();
 #endif
@@ -571,6 +573,7 @@ int JackOSSDriver::Read()
             CopyAndConvertIn(GetInputBuffer(i), buffer.data(), fEngineControl->fBufferSize, i, fCaptureChannels, fReadChannel.bytes_per_sample() * 8);
         }
     }
+    buffer.reset();
 
     fReadChannel.set_buffer(std::move(buffer), fCycleEnd + fEngineControl->fBufferSize);
 
@@ -613,7 +616,7 @@ int JackOSSDriver::Write()
     // Keep begin cycle time
     JackDriver::CycleTakeBeginTime();
 
-    // Do balance correction?
+    fWriteChannel.log_state(now);
 
 #ifdef JACK_MONITOR
     gCycleTable.fTable[gCycleCount].fBeforeWriteConvert = GetMicroSeconds();
@@ -622,6 +625,7 @@ int JackOSSDriver::Write()
     sosso::Buffer buffer = fWriteChannel.take_buffer();
 
     memset(buffer.data(), 0, buffer.length());
+    buffer.reset();
     for (int i = 0; i < fPlaybackChannels; i++) {
         if (fGraphManager->GetConnectionsNum(fPlaybackPortList[i]) > 0) {
             CopyAndConvertOut(buffer.data(), GetOutputBuffer(i), fEngineControl->fBufferSize, i, fPlaybackChannels, fWriteChannel.bytes_per_sample() * 8);
