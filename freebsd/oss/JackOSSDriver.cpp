@@ -314,7 +314,7 @@ int JackOSSDriver::OpenOutput()
 
     if (fWriteChannel.sample_rate() != fEngineControl->fSampleRate) {
         jack_error("JackOSSDriver::OpenOutput driver forced the sample rate %ld", fWriteChannel.sample_rate());
-        fReadChannel.close();
+        fWriteChannel.close();
         return -1;
     }
 
@@ -483,7 +483,7 @@ void JackOSSDriver::CloseAux()
 int JackOSSDriver::CheckTimeAndRun(std::int64_t &now)
 {
     // Check current frame time.
-    if (fFrameClock.now(now)) {
+    if (!fFrameClock.now(now)) {
         jack_error("JackOSSDriver::CheckTimeAndRun(): Frame clock failed.");
         return -1;
     }
@@ -494,7 +494,7 @@ int JackOSSDriver::CheckTimeAndRun(std::int64_t &now)
     if (fCapture && fReadChannel.recording()) {
         if ((fReadChannel.oss_available() > 0 && now > fReadChannel.last_processing()) ||
             now >= fReadChannel.wakeup_time(fReadChannel.last_processing())) {
-            if (fReadChannel.process(now)) {
+            if (!fReadChannel.process(now)) {
                 jack_error("JackOSSDriver::CheckTimeAndRun(): Read process failed.");
                 return -1;
             }
@@ -504,7 +504,7 @@ int JackOSSDriver::CheckTimeAndRun(std::int64_t &now)
     if (fPlayback && fWriteChannel.playback()) {
         if ((fWriteChannel.oss_available() > 0 && now > fWriteChannel.last_processing()) ||
             now >= fWriteChannel.wakeup_time(fWriteChannel.last_processing())) {
-            if (fWriteChannel.process(now)) {
+            if (!fWriteChannel.process(now)) {
                 jack_error("JackOSSDriver::CheckTimeAndRun(): Write process failed.");
                 return -1;
             }
