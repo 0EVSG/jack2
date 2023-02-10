@@ -3,7 +3,6 @@
 
 #include "sosso/Buffer.hpp"
 #include "sosso/Logging.hpp"
-#include <easy/profiler.h>
 
 namespace sosso {
 

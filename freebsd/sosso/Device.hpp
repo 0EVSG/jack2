@@ -2,7 +2,6 @@
 #define SOSSO_DEVICE_HPP
 
 #include "sosso/Logging.hpp"
-#include <easy/profiler.h>
 #include <fcntl.h>
 #include <sys/ioctl.h>
 #include <sys/soundcard.h>

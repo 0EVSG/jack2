@@ -2,7 +2,6 @@
 #define SOSSO_FRAMECLOCK_HPP
 
 #include "sosso/Logging.hpp"
-#include <easy/profiler.h>
 #include <time.h>
 
 namespace sosso {

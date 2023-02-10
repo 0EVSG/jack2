@@ -3,7 +3,6 @@
 
 #include <cstddef>
 #include <cstring>
-#include <easy/profiler.h>
 
 namespace sosso {
 

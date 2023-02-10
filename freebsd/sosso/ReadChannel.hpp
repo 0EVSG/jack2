@@ -4,7 +4,6 @@
 #include "sosso/Buffer.hpp"
 #include "sosso/Channel.hpp"
 #include "sosso/Logging.hpp"
-#include <easy/profiler.h>
 #include <fcntl.h>
 #include <unistd.h>
 

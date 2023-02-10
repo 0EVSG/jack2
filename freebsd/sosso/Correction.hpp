@@ -2,7 +2,6 @@
 #define SOSSO_CORRECTION_HPP
 
 #include <cstddef>
-#include <easy/profiler.h>
 
 namespace sosso {
 

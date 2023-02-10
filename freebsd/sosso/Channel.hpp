@@ -2,7 +2,6 @@
 #define SOSSO_CHANNEL_HPP
 
 #include "sosso/Device.hpp"
-#include <easy/profiler.h>
 
 namespace sosso {
 
