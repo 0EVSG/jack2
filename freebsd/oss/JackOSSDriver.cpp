@@ -270,6 +270,8 @@ int JackOSSDriver::OpenInput()
     assert(buffer.data());
     fReadChannel.set_buffer(std::move(buffer), fEngineControl->fBufferSize);
 
+    fReadChannel.request_sync(2);
+
     if (fReadChannel.sample_rate() != fEngineControl->fSampleRate) {
         jack_error("JackOSSDriver::OpenInput driver forced sample rate %ld", fReadChannel.sample_rate());
         fReadChannel.close();
@@ -311,6 +313,8 @@ int JackOSSDriver::OpenOutput()
     buffer = sosso::Buffer((char*) calloc(fOutputBufferSize, 1), fOutputBufferSize);
     assert(buffer.data());
     fWriteChannel.set_buffer(std::move(buffer), fEngineControl->fBufferSize);
+
+    fWriteChannel.request_sync(2);
 
     if (fWriteChannel.sample_rate() != fEngineControl->fSampleRate) {
         jack_error("JackOSSDriver::OpenOutput driver forced the sample rate %ld", fWriteChannel.sample_rate());
