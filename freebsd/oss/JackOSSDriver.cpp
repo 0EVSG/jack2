@@ -496,8 +496,7 @@ int JackOSSDriver::CheckTimeAndRun(std::int64_t &now)
 
     // Process read channel if wakeup time passed, or OSS buffer data available.
     if (fCapture && fReadChannel.recording()) {
-        if ((fReadChannel.oss_available() > 0 && now > fReadChannel.last_processing()) ||
-            now >= fReadChannel.wakeup_time(fReadChannel.last_processing())) {
+        if (now >= fReadChannel.wakeup_time(fReadChannel.last_processing())) {
             if (!fReadChannel.process(now)) {
                 jack_error("JackOSSDriver::CheckTimeAndRun(): Read process failed.");
                 return -1;
@@ -506,8 +505,7 @@ int JackOSSDriver::CheckTimeAndRun(std::int64_t &now)
     }
     // Process write channel if wakeup time passed, or OSS buffer space available.
     if (fPlayback && fWriteChannel.playback()) {
-        if ((fWriteChannel.oss_available() > 0 && now > fWriteChannel.last_processing()) ||
-            now >= fWriteChannel.wakeup_time(fWriteChannel.last_processing())) {
+        if (now >= fWriteChannel.wakeup_time(fWriteChannel.last_processing())) {
             if (!fWriteChannel.process(now)) {
                 jack_error("JackOSSDriver::CheckTimeAndRun(): Write process failed.");
                 return -1;
@@ -561,14 +559,7 @@ int JackOSSDriver::Read()
             if (CheckTimeAndRun(now) != 0) {
                 return -1;
             }
-            if (fReadChannel.recording()) {
-                wakeup = fReadChannel.wakeup_time(now);
-                if (fWriteChannel.playback()) {
-                    wakeup = std::min(wakeup, fWriteChannel.wakeup_time(now));
-                }
-            } else {
-                wakeup = fWriteChannel.wakeup_time(now);
-            }
+            wakeup = std::min(fReadChannel.wakeup_time(now), fWriteChannel.wakeup_time(now));
         }
     }
 
@@ -627,14 +618,7 @@ int JackOSSDriver::Write()
             if (CheckTimeAndRun(now) != 0) {
                 return -1;
             }
-            if (fReadChannel.recording()) {
-                wakeup = fReadChannel.wakeup_time(now);
-                if (fWriteChannel.playback()) {
-                    wakeup = std::min(wakeup, fWriteChannel.wakeup_time(now));
-                }
-            } else {
-                wakeup = fWriteChannel.wakeup_time(now);
-            }
+            wakeup = std::min(fReadChannel.wakeup_time(now), fWriteChannel.wakeup_time(now));
         }
     }
 

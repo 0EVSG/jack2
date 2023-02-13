@@ -3,6 +3,7 @@
 
 #include "sosso/Buffer.hpp"
 #include "sosso/Logging.hpp"
+#include <limits>
 
 namespace sosso {
 
@@ -68,6 +69,17 @@ public:
   }
 
   std::int64_t wakeup_time(std::int64_t now) const {
+    // No need to wake up if channel is not running.
+    if (!Channel::is_open()) {
+      return std::numeric_limits<std::int64_t>::max();
+    }
+    // Wakeup immediately if there's more work to do now.
+    if (Channel::oss_available() > 0 && (_buffer_a.buffer.remaining() > 0 ||
+                                         _buffer_b.buffer.remaining() > 0)) {
+      Log::log(SOSSO_LOC, "Immediate wakeup at %lld for more work.", now);
+      return now;
+    }
+    // Get upcoming buffer end and compute next channel wakeup time.
     std::int64_t sync_frames = now;
     if (!finished(now)) {
       sync_frames = period_end();

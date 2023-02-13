@@ -30,6 +30,8 @@ public:
     return bytes_per_sample(_sample_format);
   }
 
+  bool is_open() const { return _fd >= 0; }
+
   bool playback() const { return _fd >= 0 && (_file_mode & O_WRONLY); }
 
   bool recording() const { return _fd >= 0 && !playback(); }
