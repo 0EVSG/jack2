@@ -58,12 +58,6 @@ class JackOSSDriver : public JackAudioDriver
 
         std::int64_t fCycleEnd;
 
-        unsigned int fInSampleSize;
-        unsigned int fOutSampleSize;
-
-        unsigned int fInputBufferSize;
-        unsigned int fOutputBufferSize;
-        
         sosso::DoubleBuffer<sosso::ReadChannel> fReadChannel;
         sosso::DoubleBuffer<sosso::WriteChannel> fWriteChannel;
         sosso::FrameClock fFrameClock;
@@ -86,9 +80,7 @@ class JackOSSDriver : public JackAudioDriver
                 : JackAudioDriver(name, alias, engine, table),
                 fBits(0),
                 fNperiods(0), fCapture(false), fPlayback(false), fExcl(false), fIgnoreHW(true),
-                fCycleEnd(0),
-                fInSampleSize(0), fOutSampleSize(0),
-                fInputBufferSize(0), fOutputBufferSize(0)
+                fCycleEnd(0)
         {}
 
         virtual ~JackOSSDriver()

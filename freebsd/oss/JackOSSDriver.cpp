@@ -156,10 +156,11 @@ void JackOSSDriver::DisplayDeviceInfo()
 
     // Duplex cards : http://manuals.opensound.com/developer/full_duplex.html
     jack_info("Audio Interface Description :");
-    jack_info("Sampling Frequency : %d, Sample Size : %d", fEngineControl->fSampleRate, fInSampleSize * 8);
 
     if (fPlayback) {
         int fd = fWriteChannel.file_descriptor();
+
+        jack_info("Sampling Frequency : %d, Sample Size : %d", fWriteChannel.sample_rate(), fWriteChannel.bytes_per_sample() * 8);
 
         oss_sysinfo si;
         if (ioctl(fd, OSS_SYSINFO, &si) == -1) {
@@ -174,7 +175,6 @@ void JackOSSDriver::DisplayDeviceInfo()
         }
 
         jack_info("Output capabilities - %d channels : ", fPlaybackChannels);
-        jack_info("Output block size = %d", fOutputBufferSize);
 
         if (ioctl(fd, SNDCTL_DSP_GETOSPACE, &info) == -1)  {
             jack_error("JackOSSDriver::DisplayDeviceInfo SNDCTL_DSP_GETOSPACE failed : %s@%i, errno = %d", __FILE__, __LINE__, errno);
@@ -200,6 +200,8 @@ void JackOSSDriver::DisplayDeviceInfo()
     if (fCapture) {
         int fd = fReadChannel.file_descriptor();
 
+        jack_info("Sampling Frequency : %d, Sample Size : %d", fReadChannel.sample_rate(), fReadChannel.bytes_per_sample() * 8);
+
         oss_sysinfo si;
         if (ioctl(fd, OSS_SYSINFO, &si) == -1) {
             jack_error("JackOSSDriver::DisplayDeviceInfo OSS_SYSINFO failed : %s@%i, errno = %d", __FILE__, __LINE__, errno);
@@ -213,7 +215,6 @@ void JackOSSDriver::DisplayDeviceInfo()
         }
 
         jack_info("Input capabilities - %d channels : ", fCaptureChannels);
-        jack_info("Input block size = %d", fInputBufferSize);
 
         if (ioctl(fd, SNDCTL_DSP_GETISPACE, &info) == -1) {
             jack_error("JackOSSDriver::DisplayDeviceInfo SNDCTL_DSP_GETOSPACE failed : %s@%i, errno = %d", __FILE__, __LINE__, errno);
@@ -252,7 +253,6 @@ int JackOSSDriver::OpenInput()
 
     jack_log("JackOSSDriver::OpenInput input file descriptor = %d", fReadChannel.file_descriptor());
 
-    fInSampleSize = fReadChannel.bytes_per_sample();
     if (fReadChannel.channels() != fCaptureChannels) {
         fCaptureChannels = fReadChannel.channels();
         jack_info("JackOSSDriver::OpenInput driver forced the number of capture channels %ld", fCaptureChannels);
@@ -261,12 +261,13 @@ int JackOSSDriver::OpenInput()
     fReadChannel.set_target_latency(0);
 
     // Internal buffer size required for one period.
-    fInputBufferSize = fEngineControl->fBufferSize * fReadChannel.frame_size();
+    size_t period_bytes = fEngineControl->fBufferSize * fReadChannel.frame_size();
 
-    sosso::Buffer buffer((char*) calloc(fInputBufferSize, 1), fInputBufferSize);
+    // Allocate two buffers for double buffering.
+    sosso::Buffer buffer((char*) calloc(period_bytes, 1), period_bytes);
     assert(buffer.data());
     fReadChannel.set_buffer(std::move(buffer), 0);
-    buffer = sosso::Buffer((char*) calloc(fInputBufferSize, 1), fInputBufferSize);
+    buffer = sosso::Buffer((char*) calloc(period_bytes, 1), period_bytes);
     assert(buffer.data());
     fReadChannel.set_buffer(std::move(buffer), fEngineControl->fBufferSize);
 
@@ -296,7 +297,6 @@ int JackOSSDriver::OpenOutput()
 
     jack_log("JackOSSDriver::OpenOutput output file descriptor = %d", fWriteChannel.file_descriptor());
 
-    fOutSampleSize = fWriteChannel.bytes_per_sample();
     if (fWriteChannel.channels() != fPlaybackChannels) {
         fPlaybackChannels = fWriteChannel.channels();
         jack_info("JackOSSDriver::OpenOutput driver forced the number of playback channels %ld", fPlaybackChannels);
@@ -305,12 +305,13 @@ int JackOSSDriver::OpenOutput()
     fWriteChannel.set_target_latency(fEngineControl->fBufferSize);
 
     // Internal buffer size required for one period.
-    fOutputBufferSize = fEngineControl->fBufferSize * fWriteChannel.frame_size();
+    size_t period_bytes = fEngineControl->fBufferSize * fWriteChannel.frame_size();
 
-    sosso::Buffer buffer((char*) calloc(fOutputBufferSize, 1), fOutputBufferSize);
+    // Allocate two buffers for double buffering.
+    sosso::Buffer buffer((char*) calloc(period_bytes, 1), period_bytes);
     assert(buffer.data());
     fWriteChannel.set_buffer(std::move(buffer), 0);
-    buffer = sosso::Buffer((char*) calloc(fOutputBufferSize, 1), fOutputBufferSize);
+    buffer = sosso::Buffer((char*) calloc(period_bytes, 1), period_bytes);
     assert(buffer.data());
     fWriteChannel.set_buffer(std::move(buffer), fEngineControl->fBufferSize);
 
@@ -428,8 +429,6 @@ int JackOSSDriver::OpenAux()
 {
     // (Re-)Initialize runtime variables.
     fCycleEnd = 0;
-    fInSampleSize = fOutSampleSize = 0;
-    fInputBufferSize = fOutputBufferSize = 0;
 
     int group_id = 0;
 
