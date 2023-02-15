@@ -533,9 +533,9 @@ int JackOSSDriver::Read()
     }
     if (now - fLastProcessing > fMaxJackBlocking) {
         fMaxJackBlocking = now - fLastProcessing;
-        jack_info("Max Jack blocking time is %lld.", fMaxJackBlocking);
+        jack_info("Max Jack read blocking time is %lld.", fMaxJackBlocking);
     }
-    if ((now / fEngineControl->fSampleRate) % 5 == 0) {
+    if ((now / fEngineControl->fBufferSize) % ((5 * fEngineControl->fSampleRate) / fEngineControl->fBufferSize) == 0) {
         fMaxJackBlocking = 0;
     }
     if (CheckTimeAndRun(now) != 0) {
@@ -624,10 +624,7 @@ int JackOSSDriver::Write()
     }
     if (now - fLastProcessing > fMaxJackBlocking) {
         fMaxJackBlocking = now - fLastProcessing;
-        jack_info("Max Jack blocking time is %lld.", fMaxJackBlocking);
-    }
-    if ((now / fEngineControl->fSampleRate) % 5 == 0) {
-        fMaxJackBlocking = 0;
+        jack_info("Max Jack write blocking time is %lld.", fMaxJackBlocking);
     }
     if (CheckTimeAndRun(now) != 0) {
         return -1;
