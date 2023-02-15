@@ -429,6 +429,8 @@ int JackOSSDriver::OpenAux()
 {
     // (Re-)Initialize runtime variables.
     fCycleEnd = 0;
+    fLastProcessing = 0;
+    fMaxJackBlocking = 0;
 
     int group_id = 0;
 
@@ -526,6 +528,13 @@ int JackOSSDriver::Read()
 
     // Process read and write channels at least once.
     std::int64_t now = 0;
+    if (!fFrameClock.now(now)) {
+        return -1;
+    }
+    if (now - fLastProcessing > fMaxJackBlocking) {
+        fMaxJackBlocking = now - fLastProcessing;
+        jack_info("Max Jack blocking time increased to %lld.", fMaxJackBlocking);
+    }
     if (CheckTimeAndRun(now) != 0) {
         return -1;
     }
@@ -591,6 +600,11 @@ int JackOSSDriver::Read()
     gCycleTable.fTable[gCycleCount].fAfterReadConvert = GetMicroSeconds();
 #endif
 
+    if (!fFrameClock.now(now)) {
+        return -1;
+    }
+    fLastProcessing = now;
+
     return CheckTimeAndRun(now);
 }
 
@@ -602,6 +616,13 @@ int JackOSSDriver::Write()
 
     // Process read and write channels at least once.
     std::int64_t now = 0;
+    if (!fFrameClock.now(now)) {
+        return -1;
+    }
+    if (now - fLastProcessing > fMaxJackBlocking) {
+        fMaxJackBlocking = now - fLastProcessing;
+        jack_info("Max Jack blocking time increased to %lld.", fMaxJackBlocking);
+    }
     if (CheckTimeAndRun(now) != 0) {
         return -1;
     }
@@ -642,7 +663,11 @@ int JackOSSDriver::Write()
 
     // If both channels are used, correct drift relative to recording balance.
     if (fReadChannel.recording()) {
+        std::int64_t old_correction = fCorrection.correction();
         fCorrection.correct(fWriteChannel.balance(), fReadChannel.balance());
+        if (fCorrection.correction() != old_correction) {
+            jack_info("Playback correction changed from %lld to %lld.", old_correction, fCorrection.correction());
+        }
     }
 
     fWriteChannel.set_buffer(std::move(buffer), fCycleEnd + fEngineControl->fBufferSize + fCorrection.correction());
@@ -650,6 +675,11 @@ int JackOSSDriver::Write()
 #ifdef JACK_MONITOR
     gCycleTable.fTable[gCycleCount].fBeforeWrite = GetMicroSeconds();
 #endif
+
+    if (!fFrameClock.now(now)) {
+        return -1;
+    }
+    fLastProcessing = now;
 
     // Do a processing step here.
     if (CheckTimeAndRun(now) != 0) {
