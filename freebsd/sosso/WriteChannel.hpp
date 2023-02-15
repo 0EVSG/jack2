@@ -78,7 +78,7 @@ private:
 
   std::size_t restrict_write(std::size_t limit) {
     // To handle irregular initial progress, restrict write to latency target.
-    if (_ignore > 0) {
+    if (false) {
       std::int64_t queued = buffer_frames() - _oss_available;
       if (queued < _target_latency) {
         // Write at most latency target frames to OSS queue.
