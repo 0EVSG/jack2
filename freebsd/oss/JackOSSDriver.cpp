@@ -302,7 +302,7 @@ int JackOSSDriver::OpenOutput()
         jack_info("JackOSSDriver::OpenOutput driver forced the number of playback channels %ld", fPlaybackChannels);
     }
 
-    fWriteChannel.set_target_latency(fEngineControl->fBufferSize);
+    fWriteChannel.set_target_latency(0);
 
     // Internal buffer size required for one period.
     size_t period_bytes = fEngineControl->fBufferSize * fWriteChannel.frame_size();
