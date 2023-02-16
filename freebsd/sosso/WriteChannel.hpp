@@ -21,10 +21,9 @@ public:
   }
 
   void set_target_latency(std::int64_t latency = 0) {
-    latency = std::max(latency, max_progress());
-    if (latency > _target_latency) {
+    if (latency != _target_latency) {
       _target_latency = latency;
-      Log::info(SOSSO_LOC, "Playback target latency extended to %lld.",
+      Log::info(SOSSO_LOC, "Playback target latency changed to %lld.",
                 _target_latency);
     }
   }
@@ -64,7 +63,6 @@ public:
     if (_ignore > 0 && now >= end) {
       buffer.advance(buffer.remaining());
     }
-    set_target_latency();
     return true;
   }
 
@@ -76,23 +74,8 @@ private:
     return offset;
   }
 
-  std::size_t restrict_write(std::size_t limit) {
-    // To handle irregular initial progress, restrict write to latency target.
-    if (false) {
-      std::int64_t queued = buffer_frames() - _oss_available;
-      if (queued < _target_latency) {
-        // Write at most latency target frames to OSS queue.
-        limit = std::min(limit, (_target_latency - queued) * frame_size());
-      } else {
-        // Skip write.
-        limit = 0;
-      }
-    }
-    return limit;
-  }
-
   bool write_buffer(Buffer &buffer, std::size_t limit, std::int64_t now) {
-    limit = restrict_write(std::min(limit, buffer.remaining()));
+    limit = std::min(limit, buffer.remaining());
     // Write as much as currently possible.
     std::size_t bytes_written = 0;
     if (!non_blocking_write(buffer.position(), limit, bytes_written)) {
