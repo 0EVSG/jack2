@@ -91,10 +91,11 @@ private:
     std::int64_t processed = bytes_written / frame_size();
     std::int64_t progress = oss_progress(processed, available);
     // Check for OSS buffer underruns.
-    if (progress > 0 && processed + available == buffer_frames()) {
+    if (processed + available == buffer_frames()) {
       if (get_play_underruns() > 0) {
         std::int64_t loss = mark_loss(progress, now);
         Log::warn(SOSSO_LOC, "OSS playback buffer underrun, %lld lost.", loss);
+        progress += loss;
       }
     }
     return mark_progress(progress, now);
