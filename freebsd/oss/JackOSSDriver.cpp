@@ -495,6 +495,44 @@ int JackOSSDriver::CheckTimeAndRun(std::int64_t &now)
     // Round frame time down to steppings.
     now = now - (now % fReadChannel.stepping());
 
+    // Get start time of current cycle in frames.
+    std::int64_t cycle_begin = fCycleEnd - fEngineControl->fBufferSize;
+    // TODO: Is this necessary?
+    // Adjust start time to the channel we sync to.
+    if (fReadChannel.recording()) {
+      cycle_begin += fReadChannel.balance();
+    } else {
+      cycle_begin += fWriteChannel.balance();
+    }
+    // If we are late by more than one cycle, drop it and report an XRun.
+    if (now > cycle_begin + fEngineControl->fBufferSize) {
+        jack_error("JackOSSDriver::Read(): Late by %lld frames.", now - cycle_begin);
+        fCycleEnd += (now - cycle_begin);
+        // TODO: Check if we can map "now" to absolute time in microsecons.
+        NotifyXRun(GetMicroSeconds(), (float)(fFrameClock.frames_to_time(now - cycle_begin) / 1000));
+        // TODO: Replace buffers depending on cycle phase (Read(), Write()).
+        if (fReadChannel.recording()) {
+            sosso::Buffer buffer = fReadChannel.take_buffer();
+            memset(buffer.data(), 0, buffer.length());
+            buffer.reset();
+            fReadChannel.set_buffer(std::move(buffer), fCycleEnd);
+            buffer = fReadChannel.take_buffer();
+            memset(buffer.data(), 0, buffer.length());
+            buffer.reset();
+            fReadChannel.set_buffer(std::move(buffer), fCycleEnd + fEngineControl->fBufferSize);
+        }
+        if (fWriteChannel.playback()) {
+            sosso::Buffer buffer = fWriteChannel.take_buffer();
+            memset(buffer.data(), 0, buffer.length());
+            buffer.reset();
+            fWriteChannel.set_buffer(std::move(buffer), fCycleEnd + fCorrection.correction());
+            buffer = fWriteChannel.take_buffer();
+            memset(buffer.data(), 0, buffer.length());
+            buffer.reset();
+            fWriteChannel.set_buffer(std::move(buffer), fCycleEnd + fEngineControl->fBufferSize + fCorrection.correction());
+        }
+    }
+
     // Process read channel if wakeup time passed, or OSS buffer data available.
     if (fCapture && fReadChannel.recording()) {
         if (now >= fReadChannel.wakeup_time(fReadChannel.last_processing())) {
@@ -540,22 +578,6 @@ int JackOSSDriver::Read()
     }
     if (CheckTimeAndRun(now) != 0) {
         return -1;
-    }
-
-    // Get start time of current cycle in frames.
-    std::int64_t cycle_begin = fCycleEnd - fEngineControl->fBufferSize;
-    // Adjust start time to the channel we sync to.
-    if (fReadChannel.recording()) {
-      cycle_begin += fReadChannel.balance();
-    } else {
-      cycle_begin += fWriteChannel.balance();
-    }
-    // If we are late by more than one cycle, drop it and report an XRun.
-    if (now > cycle_begin + fEngineControl->fBufferSize) {
-        jack_error("JackOSSDriver::Read(): Late by %lld frames.", now - cycle_begin);
-        fCycleEnd += (now - cycle_begin);
-        // TODO: Check if we can map "now" to absolute time in microsecons.
-        NotifyXRun(GetMicroSeconds(), (float)(fFrameClock.frames_to_time(now - cycle_begin) / 1000));
     }
 
     // Wait and process channels until read, or else write, buffer is finished.
