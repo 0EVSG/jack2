@@ -3,6 +3,7 @@
 
 #include "sosso/Buffer.hpp"
 #include "sosso/Logging.hpp"
+#include <algorithm>
 #include <limits>
 
 namespace sosso {
@@ -30,6 +31,22 @@ public:
       return ready();
     }
     return false;
+  }
+
+  bool reset_buffers(std::int64_t end_frames) {
+    // Reset primary buffer.
+    if (_buffer_a.buffer.valid()) {
+      std::memset(_buffer_a.buffer.data(), 0, _buffer_a.buffer.length());
+      _buffer_a.buffer.reset();
+      _buffer_a.end_frames = end_frames;
+    }
+    // Reset secondary buffer.
+    if (_buffer_b.buffer.valid()) {
+      std::memset(_buffer_b.buffer.data(), 0, _buffer_b.buffer.length());
+      _buffer_b.buffer.reset();
+      _buffer_b.end_frames =
+          end_frames + (_buffer_b.buffer.length() / Channel::frame_size());
+    }
   }
 
   Buffer &&take_buffer() {
