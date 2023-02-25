@@ -508,6 +508,7 @@ int JackOSSDriver::CheckTimeAndRun(std::int64_t &now)
     if (gap > fEngineControl->fBufferSize) {
         jack_error("JackOSSDriver::CheckTimeAndRun(): Late by %lld frames.", gap);
         fXRunGap += gap;
+        fCycleEnd += gap;
         fReadChannel.reset_buffers(fReadChannel.end_frames() + gap);
         fWriteChannel.reset_buffers(fWriteChannel.end_frames() + gap);
     }
@@ -651,9 +652,6 @@ int JackOSSDriver::Write()
             wakeup = std::min(fReadChannel.wakeup_time(now), fWriteChannel.wakeup_time(now));
         }
     }
-
-    // Keep begin cycle time
-    JackDriver::CycleTakeBeginTime();
 
     fWriteChannel.log_state(now);
 

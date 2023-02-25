@@ -46,7 +46,7 @@ public:
       std::memset(_buffer_b.buffer.data(), 0, _buffer_b.buffer.length());
       _buffer_b.buffer.reset();
       end_frames += _buffer_b.buffer.length() / Channel::frame_size();
-      Log::info(SOSSO_LOC, "Secondary buffer reset from %lld to %lld.", _buffer_a.end_frames, end_frames);
+      Log::info(SOSSO_LOC, "Secondary buffer reset from %lld to %lld.", _buffer_b.end_frames, end_frames);
       _buffer_b.end_frames = end_frames;
     }
   }
