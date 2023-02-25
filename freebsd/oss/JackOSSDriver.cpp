@@ -431,6 +431,7 @@ int JackOSSDriver::OpenAux()
     fCycleEnd = 0;
     fLastProcessing = 0;
     fMaxJackBlocking = 0;
+    fXRunGap = 0;
 
     int group_id = 0;
 
@@ -505,9 +506,8 @@ int JackOSSDriver::CheckTimeAndRun(std::int64_t &now)
     }
     // If late by more than one period, drop it and report an XRun.
     if (gap > fEngineControl->fBufferSize) {
-        jack_error("JackOSSDriver::Read(): Late by %lld frames.", gap);
-        // TODO: Check if we can map "now" to absolute time in microsecons.
-        NotifyXRun(GetMicroSeconds(), (float)(fFrameClock.frames_to_time(gap) / 1000));
+        jack_error("JackOSSDriver::CheckTimeAndRun(): Late by %lld frames.", gap);
+        fXRunGap += gap;
         fReadChannel.reset_buffers(fReadChannel.end_frames() + gap);
         fWriteChannel.reset_buffers(fWriteChannel.end_frames() + gap);
     }
@@ -557,6 +557,12 @@ int JackOSSDriver::Read()
     }
     if (CheckTimeAndRun(now) != 0) {
         return -1;
+    }
+
+    if (fXRunGap > 0) {
+        // TODO: Check if we can map "now" to absolute time in microsecons.
+        NotifyXRun(GetMicroSeconds(), (float)(fFrameClock.frames_to_time(fXRunGap) / 1000));
+        fXRunGap = 0;
     }
 
     // Wait and process channels until read, or else write, buffer is finished.

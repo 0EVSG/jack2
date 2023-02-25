@@ -59,6 +59,7 @@ class JackOSSDriver : public JackAudioDriver
         std::int64_t fCycleEnd;
         std::int64_t fLastProcessing;
         std::int64_t fMaxJackBlocking;
+        std::int64_t fXRunGap;
 
         sosso::DoubleBuffer<sosso::ReadChannel> fReadChannel;
         sosso::DoubleBuffer<sosso::WriteChannel> fWriteChannel;
@@ -82,7 +83,7 @@ class JackOSSDriver : public JackAudioDriver
                 : JackAudioDriver(name, alias, engine, table),
                 fBits(0),
                 fNperiods(0), fCapture(false), fPlayback(false), fExcl(false), fIgnoreHW(true),
-                fCycleEnd(0), fLastProcessing(0), fMaxJackBlocking(0)
+                fCycleEnd(0), fLastProcessing(0), fMaxJackBlocking(0), fXRunGap(0)
         {}
 
         virtual ~JackOSSDriver()
