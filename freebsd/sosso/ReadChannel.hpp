@@ -29,6 +29,7 @@ public:
   }
 
   bool process(Buffer &buffer, std::int64_t end, std::int64_t now) {
+    std::int64_t overdue = now - estimated_dropout();
     std::int64_t offset = buffer_offset(buffer.remaining(), end);
     if (offset < 0) {
       // Overlapping buffers, skip the overlapping part.
@@ -54,12 +55,10 @@ public:
     std::int64_t processed = bytes_read / frame_size();
     std::int64_t progress = oss_progress(processed, available);
     // Check for OSS buffer overruns.
-    if (processed + available == buffer_frames()) {
-      if (get_rec_overruns() > 0) {
-        std::int64_t loss = mark_loss(progress, now);
-        Log::warn(SOSSO_LOC, "OSS recording buffer overrun, %lld lost.", loss);
-        progress += loss;
-      }
+    if ((overdue > 0 && get_rec_overruns() > 0) || overdue > max_progress()) {
+      std::int64_t loss = mark_loss(progress, now);
+      Log::warn(SOSSO_LOC, "OSS recording buffer overrun, %lld lost.", loss);
+      progress += loss;
     }
     if (!mark_progress(progress, now)) {
       return false;

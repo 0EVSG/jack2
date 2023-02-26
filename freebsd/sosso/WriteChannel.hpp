@@ -75,6 +75,7 @@ private:
   }
 
   bool write_buffer(Buffer &buffer, std::size_t limit, std::int64_t now) {
+    std::int64_t overdue = now - estimated_dropout();
     limit = std::min(limit, buffer.remaining());
     // Write as much as currently possible.
     std::size_t bytes_written = 0;
@@ -91,12 +92,10 @@ private:
     std::int64_t processed = bytes_written / frame_size();
     std::int64_t progress = oss_progress(processed, available);
     // Check for OSS buffer underruns.
-    if (processed + available == buffer_frames()) {
-      if (get_play_underruns() > 0) {
-        std::int64_t loss = mark_loss(progress, now);
-        Log::warn(SOSSO_LOC, "OSS playback buffer underrun, %lld lost.", loss);
-        progress += loss;
-      }
+    if ((overdue > 0 && get_play_underruns() > 0) || overdue > max_progress()) {
+      std::int64_t loss = mark_loss(progress, now);
+      Log::warn(SOSSO_LOC, "OSS playback buffer underrun, %lld lost.", loss);
+      progress += loss;
     }
     return mark_progress(progress, now);
   }

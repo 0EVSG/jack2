@@ -2,6 +2,7 @@
 #define SOSSO_CHANNEL_HPP
 
 #include "sosso/Device.hpp"
+#include <algorithm>
 
 namespace sosso {
 
@@ -53,6 +54,10 @@ public:
   std::int64_t safe_wakeup() const {
     return next_min_progress() + buffer_frames() - _oss_available -
            max_progress();
+  }
+
+  std::int64_t estimated_dropout() const {
+    return _last_progress + _balance + buffer_frames() - _oss_available;
   }
 
   std::int64_t wakeup_time(std::int64_t now, std::int64_t sync_target) const {
