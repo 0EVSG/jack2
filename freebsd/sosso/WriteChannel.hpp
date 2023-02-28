@@ -29,9 +29,20 @@ public:
   }
 
   bool process(Buffer &buffer, std::int64_t end, std::int64_t now) {
+    // Check for OSS buffer underruns.
+    std::int64_t overdue = now - estimated_dropout();
+    if ((overdue > 0 && get_play_underruns() > 0) || overdue > max_progress()) {
+      std::int64_t progress = oss_progress(0, buffer_frames());
+      std::int64_t loss = mark_loss(progress, now);
+      Log::warn(SOSSO_LOC, "OSS playback buffer underrun, %lld lost.", loss);
+      if (!mark_progress(progress + loss, now)) {
+        return false;
+      }
+    }
     std::size_t write_limit = buffer.remaining();
     std::int64_t offset = buffer_offset(buffer.remaining(), end);
     if (offset > 0) {
+      write_limit = std::min(write_limit, offset * frame_size());
       // Gap between buffers, replay parts to fill it up.
       std::int64_t rewind = buffer.rewind(offset * frame_size()) / frame_size();
       if (rewind > 0) {
@@ -39,9 +50,6 @@ public:
                   rewind);
       }
       offset -= rewind;
-      if (offset > 0) {
-        write_limit = (offset + rewind) * frame_size();
-      }
     } else if (offset < 0) {
       // Overlapping buffers, skip the overlapping part.
       std::int64_t advance =
@@ -51,7 +59,20 @@ public:
       offset += advance;
     }
     // Write as much as currently possible.
-    if (!write_buffer(buffer, write_limit, now)) {
+    std::size_t bytes_written = 0;
+    if (!non_blocking_write(buffer.position(), write_limit, bytes_written)) {
+      return false;
+    }
+    buffer.advance(bytes_written);
+    // Assume OSS buffer is full if only part of the data was written.
+    std::int64_t available = 0;
+    if (bytes_written == write_limit) {
+      // All data was written, query queued OSS buffer content.
+      available = buffer_frames() - queued_samples();
+    }
+    std::int64_t processed = bytes_written / frame_size();
+    std::int64_t progress = oss_progress(processed, available);
+    if (!mark_progress(progress, now)) {
       return false;
     }
     if (offset > 0) {
@@ -60,7 +81,7 @@ public:
       Log::info(SOSSO_LOC, "Write buffer gap %lld, fill write %lld.", offset,
                 rewind);
     }
-    if (_ignore > 0 && now >= end) {
+    if (full_resync() && now >= end) {
       buffer.advance(buffer.remaining());
     }
     return true;
@@ -72,32 +93,6 @@ private:
     std::int64_t processed = _last_progress + buffer_frames() - oss_available();
     std::int64_t offset = position + _target_latency - processed;
     return offset;
-  }
-
-  bool write_buffer(Buffer &buffer, std::size_t limit, std::int64_t now) {
-    std::int64_t overdue = now - estimated_dropout();
-    limit = std::min(limit, buffer.remaining());
-    // Write as much as currently possible.
-    std::size_t bytes_written = 0;
-    if (!non_blocking_write(buffer.position(), limit, bytes_written)) {
-      return false;
-    }
-    buffer.advance(bytes_written);
-    // Assume OSS buffer is full if only part of the data was written.
-    std::int64_t available = 0;
-    if (bytes_written == limit) {
-      // All data was written, query queued OSS buffer content.
-      available = buffer_frames() - queued_samples();
-    }
-    std::int64_t processed = bytes_written / frame_size();
-    std::int64_t progress = oss_progress(processed, available);
-    // Check for OSS buffer underruns.
-    if ((overdue > 0 && get_play_underruns() > 0) || overdue > max_progress()) {
-      std::int64_t loss = mark_loss(progress, now);
-      Log::warn(SOSSO_LOC, "OSS playback buffer underrun, %lld lost.", loss);
-      progress += loss;
-    }
-    return mark_progress(progress, now);
   }
 
   bool non_blocking_write(char *buffer, std::size_t limit,

@@ -129,7 +129,7 @@ public:
              "req %u min %lld",
              direction, sync, now, Channel::balance(), buf_a, buf_b,
              Channel::oss_available(), period_left(now),
-             Channel::sync_requested(), Channel::min_progress());
+             Channel::sync_required(), Channel::min_progress());
   }
 
 private:

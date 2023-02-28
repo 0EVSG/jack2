@@ -45,7 +45,9 @@ public:
 
   void request_sync(unsigned count = 1U) { _sync_required += count; }
 
-  unsigned sync_requested() const { return _sync_required; }
+  unsigned sync_required() const { return _sync_required; }
+
+  bool full_resync() const { return _ignore > 0; }
 
   std::int64_t oss_available() const { return _oss_available; }
 
@@ -63,8 +65,9 @@ public:
   std::int64_t wakeup_time(std::int64_t now, std::int64_t sync_target) const {
     // Use one sync step by default.
     std::int64_t wakeup = now + Device::stepping();
-    if (initial_fill() || sync_requested() > 0 ||
-        wakeup + max_progress() > sync_target) {
+    if (initial_fill() || full_resync()) {
+      // Small steps when doing a full resync.
+    } else if (sync_required() > 0 || wakeup + max_progress() > sync_target) {
       // Sync required, wake up prior to next progress if possible.
       if (next_min_progress() > wakeup) {
         wakeup = next_min_progress() - Device::stepping();
@@ -97,11 +100,14 @@ protected:
 
   bool mark_progress(std::int64_t progress, std::int64_t now) {
     if (progress > 0) {
-      if (_ignore > 0) {
+      if (full_resync()) {
         // Some cards show irregular progress at the beginning, correct that.
         // Also correct loss after under- and overruns, assume same balance.
-        _ignore -= 1;
         _last_progress = now - progress;
+        // Require a sync before transition back to normal processing.
+        if (_ignore > 1 || now <= _last_processing + stepping()) {
+          _ignore -= 1;
+        }
       } else if (now < next_min_progress() ||
                  now <= _last_processing + stepping()) {
         // Sync on progress if early or after small processing steps.
@@ -133,6 +139,7 @@ protected:
       _total_loss += loss;
       // Resync OSS progress to frame time (now) to recover from loss.
       _ignore = std::max(_ignore, 2U);
+      _sync_required = std::max(_sync_required, 1U);
     } else {
       loss = 0;
     }
