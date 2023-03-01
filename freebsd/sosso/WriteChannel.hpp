@@ -45,17 +45,16 @@ public:
       write_limit = std::min(write_limit, offset * frame_size());
       // Gap between buffers, replay parts to fill it up.
       std::int64_t rewind = buffer.rewind(offset * frame_size()) / frame_size();
-      if (rewind > 0) {
-        Log::info(SOSSO_LOC, "Write buffer gap %lld, rewind %lld.", offset,
-                  rewind);
-      }
+      Log::info(SOSSO_LOC, "@%lld - %lld Write buffer gap %lld, rewind %lld.",
+                now, end, offset, rewind);
       offset -= rewind;
     } else if (offset < 0) {
       // Overlapping buffers, skip the overlapping part.
       std::int64_t advance =
           buffer.advance((-offset) * frame_size()) / frame_size();
-      Log::info(SOSSO_LOC, "Write buffer overlap %lld, advance by %lld.",
-                offset, advance);
+      Log::info(SOSSO_LOC,
+                "@%lld - %lld Write buffer overlap %lld, advance by %lld.", now,
+                end, offset, advance);
       offset += advance;
     }
     // Write as much as currently possible.
@@ -78,8 +77,9 @@ public:
     if (offset > 0) {
       // Rewind the remaining buffer gap fill up parts.
       std::int64_t rewind = buffer.rewind(offset * frame_size()) / frame_size();
-      Log::info(SOSSO_LOC, "Write buffer gap %lld, fill write %lld.", offset,
-                rewind);
+      Log::info(SOSSO_LOC,
+                "@%lld - %lld Write buffer gap %lld, fill write %lld.", now,
+                end, offset, rewind);
     }
     if (full_resync() && now >= end) {
       buffer.advance(buffer.remaining());

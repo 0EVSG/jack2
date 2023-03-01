@@ -589,7 +589,9 @@ int JackOSSDriver::Read()
         return 0;
     }
 
-    fReadChannel.log_state(now);
+    if ((now / fEngineControl->fBufferSize) % ((5 * fEngineControl->fSampleRate) / fEngineControl->fBufferSize) == 0) {
+        fReadChannel.log_state(now);
+    }
 
 #ifdef JACK_MONITOR
     gCycleTable.fTable[gCycleCount].fAfterRead = GetMicroSeconds();
@@ -653,7 +655,9 @@ int JackOSSDriver::Write()
         }
     }
 
-    fWriteChannel.log_state(now);
+    if ((now / fEngineControl->fBufferSize) % ((5 * fEngineControl->fSampleRate) / fEngineControl->fBufferSize) == 0) {
+        fWriteChannel.log_state(now);
+    }
 
 #ifdef JACK_MONITOR
     gCycleTable.fTable[gCycleCount].fBeforeWriteConvert = GetMicroSeconds();

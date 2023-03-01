@@ -45,8 +45,9 @@ public:
       char *position = buffer.position();
       std::size_t advance = buffer.advance((-offset) * frame_size());
       std::memset(position, 0, advance);
-      Log::info(SOSSO_LOC, "Read buffer overlap %lld, advance by %lu.", offset,
-                advance / frame_size());
+      Log::info(SOSSO_LOC,
+                "@%lld - %lld Read buffer overlap %lld, advance by %lu.", now,
+                end, offset, advance / frame_size());
       offset += advance / frame_size();
     }
     // Read as much as currently available and fits into the buffer.
@@ -69,8 +70,8 @@ public:
     if (offset > 0) {
       // Gap between buffers, erase early frames not mapped to buffer.
       std::size_t erased = buffer.erase(0, offset * frame_size());
-      Log::info(SOSSO_LOC, "Read buffer gap %lld, erased %lu.", offset,
-                erased / frame_size());
+      Log::info(SOSSO_LOC, "@%lld - %lld Read buffer gap %lld, erased %lu.",
+                now, end, offset, erased / frame_size());
       offset -= erased / frame_size();
     }
     set_target_latency();

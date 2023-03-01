@@ -103,7 +103,7 @@ protected:
       if (full_resync()) {
         // Some cards show irregular progress at the beginning, correct that.
         // Also correct loss after under- and overruns, assume same balance.
-        _last_progress = now - progress;
+        _last_progress = now - progress - _balance;
         // Require a sync before transition back to normal processing.
         if (_ignore > 1 || now <= _last_processing + stepping()) {
           _ignore -= 1;
