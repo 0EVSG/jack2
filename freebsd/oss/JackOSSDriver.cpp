@@ -679,6 +679,7 @@ int JackOSSDriver::Write()
         fCorrection.correct(fWriteChannel.balance(), fReadChannel.balance());
         if (fCorrection.correction() != old_correction) {
             jack_info("Playback correction changed from %lld to %lld.", old_correction, fCorrection.correction());
+            jack_info("Read balance %lld vs write balance %lld.", fReadChannel.balance(), fWriteChannel.balance());
         }
     }
 

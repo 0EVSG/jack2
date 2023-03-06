@@ -56,6 +56,7 @@ public:
                 "@%lld - %lld Write buffer overlap %lld, advance by %lld.", now,
                 end, offset, advance);
       offset += advance;
+      write_limit = buffer.remaining();
     }
     // Write as much as currently possible.
     std::size_t bytes_written = 0;

@@ -65,7 +65,7 @@ public:
   std::int64_t wakeup_time(std::int64_t now, std::int64_t sync_target) const {
     // Use one sync step by default.
     std::int64_t wakeup = now + Device::stepping();
-    if (initial_fill() || full_resync()) {
+    if (initial_fill() || full_resync() || sync_required() > 2) {
       // Small steps when doing a full resync.
     } else if (sync_required() > 0 || wakeup + max_progress() > sync_target) {
       // Sync required, wake up prior to next progress if possible.
