@@ -124,12 +124,12 @@ public:
     const char *sync = (Channel::last_sync() == now) ? "sync" : "frame";
     std::int64_t buf_a = _buffer_a.buffer.progress() / Channel::frame_size();
     std::int64_t buf_b = _buffer_b.buffer.progress() / Channel::frame_size();
-    Log::info(SOSSO_LOC,
+    Log::log(SOSSO_LOC,
              "%s %s, %lld bal %lld, buf A %lld B %lld OSS %lld, %lld left, "
              "req %u min %lld",
              direction, sync, now, Channel::balance(), buf_a, buf_b,
-             Channel::oss_available(), period_left(now),
-             Channel::sync_required(), Channel::min_progress());
+             Channel::oss_available(), period_left(now), Channel::sync_level(),
+             Channel::min_progress());
   }
 
 private:

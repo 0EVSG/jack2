@@ -258,6 +258,7 @@ int JackOSSDriver::OpenInput()
         jack_info("JackOSSDriver::OpenInput driver forced the number of capture channels %ld", fCaptureChannels);
     }
 
+    fReadChannel.memory_map();
     fReadChannel.set_target_latency(0);
 
     // Internal buffer size required for one period.
@@ -270,8 +271,6 @@ int JackOSSDriver::OpenInput()
     buffer = sosso::Buffer((char*) calloc(period_bytes, 1), period_bytes);
     assert(buffer.data());
     fReadChannel.set_buffer(std::move(buffer), fEngineControl->fBufferSize);
-
-    fReadChannel.request_sync(2);
 
     if (fReadChannel.sample_rate() != fEngineControl->fSampleRate) {
         jack_error("JackOSSDriver::OpenInput driver forced sample rate %ld", fReadChannel.sample_rate());
@@ -302,6 +301,7 @@ int JackOSSDriver::OpenOutput()
         jack_info("JackOSSDriver::OpenOutput driver forced the number of playback channels %ld", fPlaybackChannels);
     }
 
+    fWriteChannel.memory_map();
     fWriteChannel.set_target_latency(0);
 
     // Internal buffer size required for one period.
@@ -314,8 +314,6 @@ int JackOSSDriver::OpenOutput()
     buffer = sosso::Buffer((char*) calloc(period_bytes, 1), period_bytes);
     assert(buffer.data());
     fWriteChannel.set_buffer(std::move(buffer), fEngineControl->fBufferSize);
-
-    fWriteChannel.request_sync(2);
 
     if (fWriteChannel.sample_rate() != fEngineControl->fSampleRate) {
         jack_error("JackOSSDriver::OpenOutput driver forced the sample rate %ld", fWriteChannel.sample_rate());
@@ -476,12 +474,14 @@ void JackOSSDriver::CloseAux()
     if (fCapture && fReadChannel.recording()) {
         free(fReadChannel.take_buffer().data());
         free(fReadChannel.take_buffer().data());
+        fReadChannel.memory_unmap();
         fReadChannel.close();
     }
 
     if (fPlayback && fWriteChannel.playback()) {
         free(fWriteChannel.take_buffer().data());
         free(fWriteChannel.take_buffer().data());
+        fWriteChannel.memory_unmap();
         fWriteChannel.close();
     }
 }

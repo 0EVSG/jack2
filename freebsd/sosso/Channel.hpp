@@ -18,8 +18,7 @@ public:
     _max_progress = 0;
     _oss_available = 0;
     _total_loss = 0;
-    _sync_required = 0;
-    _ignore = 4;
+    _sync_level = 8;
     bool ok = Device::open(device, mode);
     if (playback()) {
       _oss_available = buffer_frames();
@@ -41,13 +40,13 @@ public:
 
   std::int64_t min_progress() const { return _min_progress; }
 
-  bool initial_fill() const { return _max_progress == 0; }
+  unsigned sync_level() const { return _sync_level; }
 
-  void request_sync(unsigned count = 1U) { _sync_required += count; }
+  bool freewheel() const { return _sync_level > 4; }
 
-  unsigned sync_required() const { return _sync_required; }
+  bool full_resync() const { return _sync_level > 2; }
 
-  bool full_resync() const { return _ignore > 0; }
+  bool resync() const { return _sync_level > 0; }
 
   std::int64_t oss_available() const { return _oss_available; }
 
@@ -65,9 +64,9 @@ public:
   std::int64_t wakeup_time(std::int64_t now, std::int64_t sync_target) const {
     // Use one sync step by default.
     std::int64_t wakeup = now + Device::stepping();
-    if (initial_fill() || full_resync() || sync_required() > 2) {
+    if (freewheel() || full_resync()) {
       // Small steps when doing a full resync.
-    } else if (sync_required() > 0 || wakeup + max_progress() > sync_target) {
+    } else if (resync() || wakeup + max_progress() > sync_target) {
       // Sync required, wake up prior to next progress if possible.
       if (next_min_progress() > wakeup) {
         wakeup = next_min_progress() - Device::stepping();
@@ -100,21 +99,20 @@ protected:
 
   bool mark_progress(std::int64_t progress, std::int64_t now) {
     if (progress > 0) {
-      if (full_resync()) {
+      if (freewheel()) {
         // Some cards show irregular progress at the beginning, correct that.
         // Also correct loss after under- and overruns, assume same balance.
         _last_progress = now - progress - _balance;
         // Require a sync before transition back to normal processing.
-        if (_ignore > 1 || now <= _last_processing + stepping()) {
-          _ignore -= 1;
+        if (now <= _last_processing + stepping()) {
+          _sync_level -= 1;
         }
-      } else if (now < next_min_progress() ||
-                 now <= _last_processing + stepping()) {
-        // Sync on progress if early or after small processing steps.
+      } else if (now <= _last_processing + stepping()) {
+        // Successful sync on progress within small processing steps.
         _balance = now - (_last_progress + progress);
         _last_sync = now;
-        if (_sync_required > 0) {
-          _sync_required -= 1;
+        if (_sync_level > 0) {
+          _sync_level -= 1;
         }
         if (progress < _min_progress || _min_progress == 0) {
           _min_progress = progress;
@@ -124,7 +122,7 @@ protected:
         }
       } else {
         // Big step with progress but no sync, requires a resync.
-        _sync_required += 1;
+        _sync_level += 1;
       }
       _last_progress += progress;
     }
@@ -135,11 +133,14 @@ protected:
   std::int64_t mark_loss(std::int64_t progress, std::int64_t now) {
     // Approximate frames lost due to over- or underrun.
     std::int64_t loss = (now - _balance) - (_last_progress + progress);
+    return mark_loss(loss);
+  }
+
+  std::int64_t mark_loss(std::int64_t loss) {
     if (loss > 0) {
       _total_loss += loss;
       // Resync OSS progress to frame time (now) to recover from loss.
-      _ignore = std::max(_ignore, 2U);
-      _sync_required = std::max(_sync_required, 1U);
+      _sync_level = std::max(_sync_level, 6U);
     } else {
       loss = 0;
     }
@@ -154,8 +155,7 @@ protected:
   std::int64_t _max_progress = 0;
   std::int64_t _oss_available = 0;
   std::int64_t _total_loss = 0;
-  unsigned _sync_required = 0;
-  unsigned _ignore = 4;
+  unsigned _sync_level = 0;
 };
 
 } // namespace sosso

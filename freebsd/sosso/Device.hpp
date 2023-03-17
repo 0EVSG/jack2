@@ -2,8 +2,11 @@
 #define SOSSO_DEVICE_HPP
 
 #include "sosso/Logging.hpp"
+#include <cstdint>
 #include <fcntl.h>
+#include <sys/errno.h>
 #include <sys/ioctl.h>
+#include <sys/mman.h>
 #include <sys/soundcard.h>
 #include <unistd.h>
 
@@ -57,6 +60,12 @@ public:
   std::int64_t time_to_frames(std::int64_t time_ns) const {
     return (time_ns * _sample_rate) / 1000000000;
   }
+
+  char *map() const { return static_cast<char *>(_map); }
+
+  unsigned map_pointer() const { return _map_progress % buffer_size(); }
+
+  std::int64_t map_progress() const { return _map_progress / frame_size(); }
 
   bool set_parameters(int format, int rate, int channels) {
     if (bytes_per_sample(format) && channels > 0) {
@@ -198,6 +207,101 @@ public:
     return rec_overruns;
   }
 
+  bool get_play_pointer() {
+    count_info info = {};
+    if (ioctl(file_descriptor(), SNDCTL_DSP_GETOPTR, &info) == 0) {
+      if (info.ptr >= 0 && static_cast<unsigned>(info.ptr) < buffer_size() &&
+          (info.ptr % frame_size()) == 0 && info.blocks >= 0) {
+        // Calculate pointer delta without complete buffer cycles.
+        unsigned delta =
+            (info.ptr + buffer_size() - map_pointer()) % buffer_size();
+        // Get upper bound on progress from blocks info.
+        unsigned max_bytes = (info.blocks + 1) * _fragment_size - 1;
+        if (max_bytes >= delta) {
+          // Estimate cycle part and round it down to buffer cycles.
+          unsigned cycles = max_bytes - delta;
+          cycles -= (cycles % buffer_size());
+          delta += cycles;
+        }
+        int fragments = delta / _fragment_size;
+        if (info.blocks < fragments || info.blocks > fragments + 1) {
+          Log::warn(SOSSO_LOC, "Play pointer blocks: %u - %d, %d, %d.",
+                    map_pointer(), info.ptr, info.blocks, info.bytes);
+        }
+        _map_progress += delta;
+        return true;
+      }
+      Log::warn(SOSSO_LOC, "Play pointer out of bounds: %d, %d blocks.",
+                info.ptr, info.blocks);
+    } else {
+      Log::warn(SOSSO_LOC, "Play pointer failed with error: %d.", errno);
+    }
+    return false;
+  }
+
+  bool get_rec_pointer() {
+    count_info info = {};
+    if (ioctl(file_descriptor(), SNDCTL_DSP_GETIPTR, &info) == 0) {
+      if (info.ptr >= 0 && static_cast<unsigned>(info.ptr) < buffer_size() &&
+          (info.ptr % frame_size()) == 0 && info.blocks >= 0) {
+        // Calculate pointer delta without complete buffer cycles.
+        unsigned delta =
+            (info.ptr + buffer_size() - map_pointer()) % buffer_size();
+        // Get upper bound on progress from blocks info.
+        unsigned max_bytes = (info.blocks + 1) * _fragment_size - 1;
+        if (max_bytes >= delta) {
+          // Estimate cycle part and round it down to buffer cycles.
+          unsigned cycles = max_bytes - delta;
+          cycles -= (cycles % buffer_size());
+          delta += cycles;
+        }
+        int fragments = delta / _fragment_size;
+        if (info.blocks < fragments || info.blocks > fragments + 1) {
+          Log::warn(SOSSO_LOC, "Rec pointer blocks: %u - %d, %d, %d.",
+                    map_pointer(), info.ptr, info.blocks, info.bytes);
+        }
+        _map_progress += delta;
+        return true;
+      }
+      Log::warn(SOSSO_LOC, "Rec pointer out of bounds: %d, %d blocks.",
+                info.ptr, info.blocks);
+    } else {
+      Log::warn(SOSSO_LOC, "Rec pointer failed with error: %d.", errno);
+    }
+    return false;
+  }
+
+  bool memory_map() {
+    int protection = PROT_NONE;
+    if (playback()) {
+      protection = PROT_WRITE;
+    }
+    if (recording()) {
+      protection = PROT_READ;
+    }
+    if (protection != PROT_NONE) {
+      _map = mmap(NULL, buffer_size(), protection, MAP_SHARED,
+                  file_descriptor(), 0);
+      if (_map != MAP_FAILED) {
+        return true;
+      } else {
+        Log::warn(SOSSO_LOC, "Memory map failed with error %d.", errno);
+        _map = nullptr;
+      }
+    }
+    return false;
+  }
+
+  bool memory_unmap() {
+    if (_map) {
+      if (munmap(_map, buffer_size()) != 0) {
+        Log::warn(SOSSO_LOC, "Memory unmap failed with error %d.", errno);
+        return false;
+      }
+    }
+    return true;
+  }
+
 private:
   bool bitperfect_mode(int fd) {
     if (_file_mode & O_EXCL) {
@@ -276,6 +380,8 @@ private:
 private:
   int _fd = -1;
   int _file_mode = O_RDONLY;
+  void *_map = nullptr;
+  std::uint64_t _map_progress = 0;
   int _channels = 2;
   int _sample_format = AFMT_S32_NE;
   int _sample_rate = 48000;

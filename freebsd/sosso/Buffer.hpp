@@ -42,10 +42,15 @@ public:
 
   std::size_t remaining() const { return _length - _position; }
 
-  std::size_t advance(std::size_t progress) {
+  std::size_t remaining(std::size_t progress) const {
     if (progress > remaining()) {
       progress = remaining();
     }
+    return progress;
+  }
+
+  std::size_t advance(std::size_t progress) {
+    progress = remaining(progress);
     _position += progress;
     return progress;
   }
