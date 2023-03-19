@@ -34,15 +34,23 @@ public:
     if (get_play_pointer()) {
       std::int64_t progress = map_progress() - _oss_progress;
       if (progress > 0) {
+        // Sometimes OSS playback starts with a bogus extra buffer cycle.
+        if (progress > buffer_frames() &&
+            now - last_processing() < buffer_frames() / 2) {
+          Log::warn(SOSSO_LOC,
+                    "OSS playback bogus buffer cycle, %lld frames in %lld.",
+                    progress, now - last_processing());
+          progress = progress % buffer_frames();
+        }
         // Clear obsolete audio data in the buffer.
         map_write(nullptr, (_oss_progress % buffer_frames()) * frame_size(),
                   progress * frame_size());
-        _oss_progress += progress;
+        _oss_progress = map_progress();
       }
       std::int64_t available = progress + oss_available();
       std::int64_t loss = mark_loss(available - buffer_frames());
       if (loss > 0) {
-        Log::warn(SOSSO_LOC, "OSS playback buffer overrun, %lld lost.", loss);
+        Log::warn(SOSSO_LOC, "OSS playback buffer underrun, %lld lost.", loss);
       }
       available -= loss;
       oss_progress(0, available);
