@@ -586,6 +586,7 @@ int JackOSSDriver::Read()
     JackDriver::CycleTakeBeginTime();
 
     if (!fReadChannel.recording()) {
+        fLastProcessing = now;
         return 0;
     }
 
@@ -692,12 +693,12 @@ int JackOSSDriver::Write()
     if (!fFrameClock.now(now)) {
         return -1;
     }
-    fLastProcessing = now;
 
     // Do a processing step here.
     if (CheckTimeAndRun(now) != 0) {
         return -1;
     }
+    fLastProcessing = now;
 
 #ifdef JACK_MONITOR
     gCycleTable.fTable[gCycleCount].fAfterWrite = GetMicroSeconds();
