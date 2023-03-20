@@ -493,6 +493,7 @@ int JackOSSDriver::CheckTimeAndRun(std::int64_t &now)
         jack_error("JackOSSDriver::CheckTimeAndRun(): Frame clock failed.");
         return -1;
     }
+    fLastProcessing = now;
     // Round frame time down to steppings.
     now = now - (now % fReadChannel.stepping());
 
@@ -586,7 +587,6 @@ int JackOSSDriver::Read()
     JackDriver::CycleTakeBeginTime();
 
     if (!fReadChannel.recording()) {
-        fLastProcessing = now;
         return 0;
     }
 
@@ -613,11 +613,6 @@ int JackOSSDriver::Read()
 #ifdef JACK_MONITOR
     gCycleTable.fTable[gCycleCount].fAfterReadConvert = GetMicroSeconds();
 #endif
-
-    if (!fFrameClock.now(now)) {
-        return -1;
-    }
-    fLastProcessing = now;
 
     return CheckTimeAndRun(now);
 }
@@ -690,15 +685,10 @@ int JackOSSDriver::Write()
     gCycleTable.fTable[gCycleCount].fBeforeWrite = GetMicroSeconds();
 #endif
 
-    if (!fFrameClock.now(now)) {
-        return -1;
-    }
-
     // Do a processing step here.
     if (CheckTimeAndRun(now) != 0) {
         return -1;
     }
-    fLastProcessing = now;
 
 #ifdef JACK_MONITOR
     gCycleTable.fTable[gCycleCount].fAfterWrite = GetMicroSeconds();
