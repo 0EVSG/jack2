@@ -3,6 +3,7 @@
 
 #include "sosso/Logging.hpp"
 #include <cstdint>
+#include <cstring>
 #include <fcntl.h>
 #include <sys/errno.h>
 #include <sys/ioctl.h>
@@ -61,6 +62,8 @@ public:
     return (time_ns * _sample_rate) / 1000000000;
   }
 
+  bool can_memory_map() const { return has_capability(PCM_CAP_MMAP); }
+
   char *map() const { return static_cast<char *>(_map); }
 
   unsigned map_pointer() const { return _map_progress % buffer_size(); }
@@ -87,7 +90,7 @@ public:
     if (_fd >= 0) {
       _file_mode = mode;
       if (bitperfect_mode(_fd) && set_sample_format(_fd) && set_channels(_fd) &&
-          set_sample_rate(_fd) && get_buffer_info()) {
+          set_sample_rate(_fd) && get_buffer_info() && get_capabilities()) {
         return true;
       }
     }
@@ -151,7 +154,13 @@ public:
     }
   }
 
+  bool can_trigger() const { return has_capability(PCM_CAP_TRIGGER); }
+
   bool start() const {
+    if (!can_trigger()) {
+      Log::warn(SOSSO_LOC, "Trigger start not supported by device.");
+      return false;
+    }
     int trigger = recording() ? PCM_ENABLE_INPUT : PCM_ENABLE_OUTPUT;
     if (ioctl(file_descriptor(), SNDCTL_DSP_SETTRIGGER, &trigger) != 0) {
       const char *direction = recording() ? "recording" : "playback";
@@ -272,6 +281,10 @@ public:
   }
 
   bool memory_map() {
+    if (!can_memory_map()) {
+      Log::warn(SOSSO_LOC, "Memory map not supported by device.");
+      return false;
+    }
     int protection = PROT_NONE;
     if (playback()) {
       protection = PROT_WRITE;
@@ -300,6 +313,34 @@ public:
       }
     }
     return true;
+  }
+
+  bool has_capability(int capability) const {
+    return (_capabilities & capability) != 0;
+  }
+
+  void log_capabilities() const {
+    Log::info(SOSSO_LOC, "Channel capabilities:");
+    if (has_capability(PCM_CAP_TRIGGER))
+      Log::info(SOSSO_LOC, "  PCM_CAP_TRIGGER (Trigger start)");
+    if (has_capability(PCM_CAP_MMAP))
+      Log::info(SOSSO_LOC, "  PCM_CAP_MMAP (Memory map)");
+    if (has_capability(PCM_CAP_MULTI))
+      Log::info(SOSSO_LOC, "  PCM_CAP_MULTI (Multiple open)");
+    if (has_capability(PCM_CAP_INPUT))
+      Log::info(SOSSO_LOC, "  PCM_CAP_INPUT (Recording)");
+    if (has_capability(PCM_CAP_OUTPUT))
+      Log::info(SOSSO_LOC, "  PCM_CAP_OUTPUT (Playback)");
+    if (has_capability(PCM_CAP_VIRTUAL))
+      Log::info(SOSSO_LOC, "  PCM_CAP_VIRTUAL (Virtual device)");
+    if (has_capability(PCM_CAP_ANALOGIN))
+      Log::info(SOSSO_LOC, "  PCM_CAP_ANALOGIN (Analog input)");
+    if (has_capability(PCM_CAP_ANALOGOUT))
+      Log::info(SOSSO_LOC, "  PCM_CAP_ANALOGOUT (Analog output)");
+    if (has_capability(PCM_CAP_DIGITALIN))
+      Log::info(SOSSO_LOC, "  PCM_CAP_DIGITALIN (Digital input)");
+    if (has_capability(PCM_CAP_DIGITALOUT))
+      Log::info(SOSSO_LOC, "  PCM_CAP_DIGITALOUT (Digital output)");
   }
 
 private:
@@ -377,12 +418,35 @@ private:
     }
   }
 
+  bool get_capabilities() {
+    if (ioctl(_fd, SNDCTL_DSP_GETCAPS, &_capabilities) == 0) {
+      oss_sysinfo sysinfo = {};
+      if (ioctl(_fd, OSS_SYSINFO, &sysinfo) == 0) {
+        if (std::strncmp(sysinfo.version, "1302000", 7) < 0) {
+          // Memory map on FreeBSD prior to 13.2 may use wrong buffer size.
+          Log::warn(SOSSO_LOC,
+                    "Disable memory map, workaround OSS bug on FreeBSD < 13.2");
+          _capabilities &= ~PCM_CAP_MMAP;
+        }
+        return true;
+      } else {
+        Log::warn(SOSSO_LOC, "Unable to get system info, error %d.", errno);
+      }
+    } else {
+      Log::warn(SOSSO_LOC, "Unable to get device capabilities, error %d.",
+                errno);
+      _capabilities = 0;
+      return false;
+    }
+  }
+
 private:
   int _fd = -1;
   int _file_mode = O_RDONLY;
   void *_map = nullptr;
   std::uint64_t _map_progress = 0;
   int _channels = 2;
+  int _capabilities = 0;
   int _sample_format = AFMT_S32_NE;
   int _sample_rate = 48000;
   unsigned _fragments = 0;
