@@ -57,7 +57,8 @@ class JackOSSDriver : public JackAudioDriver
         bool fIgnoreHW;
 
         std::int64_t fCycleEnd;
-        std::int64_t fLastProcessing;
+        std::int64_t fFrameStamp;
+        std::int64_t fNextWakeup;
         std::int64_t fMaxJackBlocking;
         std::int64_t fXRunGap;
 
@@ -72,7 +73,7 @@ class JackOSSDriver : public JackAudioDriver
         void CloseAux();
         void DisplayDeviceInfo();
         int WaitAndSync();
-        int CheckTimeAndRun(std::int64_t &now);
+        int CheckTimeAndRun();
 
     protected:
         virtual void UpdateLatencies();
@@ -83,7 +84,7 @@ class JackOSSDriver : public JackAudioDriver
                 : JackAudioDriver(name, alias, engine, table),
                 fBits(0),
                 fNperiods(0), fCapture(false), fPlayback(false), fExcl(false), fIgnoreHW(true),
-                fCycleEnd(0), fLastProcessing(0), fMaxJackBlocking(0), fXRunGap(0)
+                fCycleEnd(0), fFrameStamp(0), fNextWakeup(0), fMaxJackBlocking(0), fXRunGap(0)
         {}
 
         virtual ~JackOSSDriver()

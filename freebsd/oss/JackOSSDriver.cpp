@@ -427,7 +427,8 @@ int JackOSSDriver::OpenAux()
 {
     // (Re-)Initialize runtime variables.
     fCycleEnd = 0;
-    fLastProcessing = 0;
+    fFrameStamp = 0;
+    fNextWakeup = 0;
     fMaxJackBlocking = 0;
     fXRunGap = 0;
 
@@ -486,14 +487,14 @@ void JackOSSDriver::CloseAux()
     }
 }
 
-int JackOSSDriver::CheckTimeAndRun(std::int64_t &now)
+int JackOSSDriver::CheckTimeAndRun()
 {
     // Check current frame time.
-    if (!fFrameClock.now(now)) {
+    if (!fFrameClock.now(fFrameStamp)) {
         jack_error("JackOSSDriver::CheckTimeAndRun(): Frame clock failed.");
         return -1;
     }
-    fLastProcessing = now;
+    std::int64_t now = fFrameStamp;
     // Round frame time down to steppings.
     now = now - (now % fReadChannel.stepping());
 
@@ -533,6 +534,8 @@ int JackOSSDriver::CheckTimeAndRun(std::int64_t &now)
         }
     }
 
+    fNextWakeup = std::min(fReadChannel.wakeup_time(now), fWriteChannel.wakeup_time(now));
+
     return 0;
 }
 
@@ -546,40 +549,37 @@ int JackOSSDriver::Read()
     fCycleEnd += fEngineControl->fBufferSize;
 
     // Process read and write channels at least once.
-    std::int64_t now = 0;
-    if (!fFrameClock.now(now)) {
+    std::int64_t previous_stamp = fFrameStamp;
+    if (CheckTimeAndRun() != 0) {
         return -1;
     }
-    if (now - fLastProcessing > fMaxJackBlocking) {
-        fMaxJackBlocking = now - fLastProcessing;
+    // Keep track of maximum time OSS driver is blocked from processing.
+    if (fFrameStamp - previous_stamp > fMaxJackBlocking) {
+        fMaxJackBlocking = fFrameStamp - previous_stamp;
         jack_info("Max Jack read blocking time is %lld.", fMaxJackBlocking);
     }
-    if ((now / fEngineControl->fBufferSize) % ((5 * fEngineControl->fSampleRate) / fEngineControl->fBufferSize) == 0) {
+    // Reset maximum blocking time approximately every 5 seconds.
+    if ((fFrameStamp / fEngineControl->fBufferSize) % ((5 * fEngineControl->fSampleRate) / fEngineControl->fBufferSize) == 0) {
         fMaxJackBlocking = 0;
-    }
-    if (CheckTimeAndRun(now) != 0) {
-        return -1;
     }
 
     if (fXRunGap > 0) {
-        // TODO: Check if we can map "now" to absolute time in microsecons.
+        // TODO: Check if we can map "fFrameStamp" to absolute time in microsecons.
         NotifyXRun(GetMicroSeconds(), (float)(fFrameClock.frames_to_time(fXRunGap) / 1000));
         fXRunGap = 0;
     }
 
     // Wait and process channels until read, or else write, buffer is finished.
-    std::int64_t wakeup = now;
-    while ((fReadChannel.recording() && !fReadChannel.finished(now)) ||
-           (!fReadChannel.recording() && !fWriteChannel.finished(now))) {
-        if (wakeup > now) {
-            if (fFrameClock.sleep(wakeup)) {
-                now = wakeup;
+    while ((fReadChannel.recording() && !fReadChannel.finished(fFrameStamp)) ||
+           (!fReadChannel.recording() && !fWriteChannel.finished(fFrameStamp))) {
+        if (fNextWakeup > fFrameStamp) {
+            if (fFrameClock.sleep(fNextWakeup)) {
+                fFrameStamp = fNextWakeup;
             }
         } else {
-            if (CheckTimeAndRun(now) != 0) {
+            if (CheckTimeAndRun() != 0) {
                 return -1;
             }
-            wakeup = std::min(fReadChannel.wakeup_time(now), fWriteChannel.wakeup_time(now));
         }
     }
 
@@ -590,8 +590,8 @@ int JackOSSDriver::Read()
         return 0;
     }
 
-    if ((now / fEngineControl->fBufferSize) % ((5 * fEngineControl->fSampleRate) / fEngineControl->fBufferSize) == 0) {
-        fReadChannel.log_state(now);
+    if ((fFrameStamp / fEngineControl->fBufferSize) % ((5 * fEngineControl->fSampleRate) / fEngineControl->fBufferSize) == 0) {
+        fReadChannel.log_state(fFrameStamp);
     }
 
 #ifdef JACK_MONITOR
@@ -614,7 +614,7 @@ int JackOSSDriver::Read()
     gCycleTable.fTable[gCycleCount].fAfterReadConvert = GetMicroSeconds();
 #endif
 
-    return CheckTimeAndRun(now);
+    return CheckTimeAndRun();
 }
 
 int JackOSSDriver::Write()
@@ -624,35 +624,31 @@ int JackOSSDriver::Write()
     }
 
     // Process read and write channels at least once.
-    std::int64_t now = 0;
-    if (!fFrameClock.now(now)) {
+    std::int64_t previous_stamp = fFrameStamp;
+    if (CheckTimeAndRun() != 0) {
         return -1;
     }
-    if (now - fLastProcessing > fMaxJackBlocking) {
-        fMaxJackBlocking = now - fLastProcessing;
+    // Keep track of maximum time OSS driver is blocked from processing.
+    if (fFrameStamp - previous_stamp > fMaxJackBlocking) {
+        fMaxJackBlocking = fFrameStamp - previous_stamp;
         jack_info("Max Jack write blocking time is %lld.", fMaxJackBlocking);
-    }
-    if (CheckTimeAndRun(now) != 0) {
-        return -1;
     }
 
     // Wait and process channels until write buffer is finished.
-    std::int64_t wakeup = now;
-    while (!fWriteChannel.finished(now)) {
-        if (wakeup > now) {
-            if (fFrameClock.sleep(wakeup)) {
-                now = wakeup;
+    while (!fWriteChannel.finished(fFrameStamp)) {
+        if (fNextWakeup > fFrameStamp) {
+            if (fFrameClock.sleep(fNextWakeup)) {
+                fFrameStamp = fNextWakeup;
             }
         } else {
-            if (CheckTimeAndRun(now) != 0) {
+            if (CheckTimeAndRun() != 0) {
                 return -1;
             }
-            wakeup = std::min(fReadChannel.wakeup_time(now), fWriteChannel.wakeup_time(now));
         }
     }
 
-    if ((now / fEngineControl->fBufferSize) % ((5 * fEngineControl->fSampleRate) / fEngineControl->fBufferSize) == 0) {
-        fWriteChannel.log_state(now);
+    if ((fFrameStamp / fEngineControl->fBufferSize) % ((5 * fEngineControl->fSampleRate) / fEngineControl->fBufferSize) == 0) {
+        fWriteChannel.log_state(fFrameStamp);
     }
 
 #ifdef JACK_MONITOR
@@ -686,7 +682,7 @@ int JackOSSDriver::Write()
 #endif
 
     // Do a processing step here.
-    if (CheckTimeAndRun(now) != 0) {
+    if (CheckTimeAndRun() != 0) {
         return -1;
     }
 
