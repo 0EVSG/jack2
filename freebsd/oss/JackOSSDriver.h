@@ -22,6 +22,7 @@ Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 #define __JackOSSDriver__
 
 #include "JackAudioDriver.h"
+#include "JackOSSChannel.h"
 #include "sosso/Correction.hpp"
 #include "sosso/DoubleBuffer.hpp"
 #include "sosso/FrameClock.hpp"
@@ -67,12 +68,14 @@ class JackOSSDriver : public JackAudioDriver
         sosso::FrameClock fFrameClock;
         sosso::Correction fCorrection;
 
+        JackOSSChannel fChannel;
+        JackThread fAssistThread;
+
         int OpenInput();
         int OpenOutput();
         int OpenAux();
         void CloseAux();
         void DisplayDeviceInfo();
-        int WaitAndSync();
         int CheckTimeAndRun();
 
     protected:
@@ -84,7 +87,8 @@ class JackOSSDriver : public JackAudioDriver
                 : JackAudioDriver(name, alias, engine, table),
                 fBits(0),
                 fNperiods(0), fCapture(false), fPlayback(false), fExcl(false), fIgnoreHW(true),
-                fCycleEnd(0), fFrameStamp(0), fNextWakeup(0), fMaxJackBlocking(0), fXRunGap(0)
+                fCycleEnd(0), fFrameStamp(0), fNextWakeup(0), fMaxJackBlocking(0), fXRunGap(0),
+                fAssistThread(&fChannel)
         {}
 
         virtual ~JackOSSDriver()

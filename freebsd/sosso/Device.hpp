@@ -436,8 +436,8 @@ private:
       Log::warn(SOSSO_LOC, "Unable to get device capabilities, error %d.",
                 errno);
       _capabilities = 0;
-      return false;
     }
+    return false;
   }
 
 private:

@@ -467,11 +467,17 @@ int JackOSSDriver::OpenAux()
     fCorrection.set_drift_limits(-limit, limit);
 
     DisplayDeviceInfo();
+
+    if (fAssistThread.Start() < 0) {
+        return -1;
+    }
     return 0;
 }
 
 void JackOSSDriver::CloseAux()
 {
+    fAssistThread.Stop();
+
     if (fCapture && fReadChannel.recording()) {
         free(fReadChannel.take_buffer().data());
         free(fReadChannel.take_buffer().data());
