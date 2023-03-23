@@ -551,6 +551,10 @@ int JackOSSDriver::Read()
     gCycleTable.fTable[gCycleCount].fBeforeRead = GetMicroSeconds();
 #endif
 
+    if (!fChannel.Lock()) {
+        return -1;
+    }
+
     // Mark the end time of this cycle, in frames.
     fCycleEnd += fEngineControl->fBufferSize;
 
@@ -593,6 +597,9 @@ int JackOSSDriver::Read()
     JackDriver::CycleTakeBeginTime();
 
     if (!fReadChannel.recording()) {
+        if (!fChannel.Unlock()) {
+            return -1;
+        }
         return 0;
     }
 
@@ -620,6 +627,10 @@ int JackOSSDriver::Read()
     gCycleTable.fTable[gCycleCount].fAfterReadConvert = GetMicroSeconds();
 #endif
 
+    if (!fChannel.Unlock()) {
+        return -1;
+    }
+
     return CheckTimeAndRun();
 }
 
@@ -627,6 +638,10 @@ int JackOSSDriver::Write()
 {
     if (!fWriteChannel.playback()) {
         return 0;
+    }
+
+    if (!fChannel.Lock()) {
+        return -1;
     }
 
     // Process read and write channels at least once.
@@ -696,6 +711,10 @@ int JackOSSDriver::Write()
     gCycleTable.fTable[gCycleCount].fAfterWrite = GetMicroSeconds();
     gCycleCount = (gCycleCount == CYCLE_POINTS - 1) ? gCycleCount: gCycleCount + 1;
 #endif
+
+    if (!fChannel.Unlock()) {
+        return -1;
+    }
 
     return 0;
 }

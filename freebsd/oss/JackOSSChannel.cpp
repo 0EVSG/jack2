@@ -44,18 +44,26 @@ namespace Jack
 
 bool JackOSSChannel::Init()
 {
-    jack_info("JackOSSChannel::Init() running.");
-    fFrameClock.init_clock(48000);
-    return true;
+    if (Lock()) {
+        jack_info("JackOSSChannel::Init() running.");
+        fFrameClock.init_clock(48000);
+        return Unlock();
+    }
+    return false;
 }
 
 bool JackOSSChannel::Execute()
 {
-    jack_info("JackOSSChannel::Execute() running.");
-    std::int64_t now = 0;
-    fFrameClock.now(now);
-    fFrameClock.sleep(now + 5 * 48000);
-    return true;
+    if (Lock()) {
+        jack_info("JackOSSChannel::Execute() running.");
+        std::int64_t now = 0;
+        fFrameClock.now(now);
+        if (Unlock()) {
+            fFrameClock.sleep(now + 5 * 48000);
+            return true;
+        }
+    }
+    return false;
 }
 
 } // end of namespace

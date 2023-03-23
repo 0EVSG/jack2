@@ -21,6 +21,7 @@ Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 #ifndef __JackOSSChannel__
 #define __JackOSSChannel__
 
+#include "JackMutex.h"
 #include "JackThread.h"
 #include "sosso/Correction.hpp"
 #include "sosso/DoubleBuffer.hpp"
@@ -41,6 +42,7 @@ class JackOSSChannel : public JackRunnableInterface
 {
 
     private:
+        JackMutex fMutex;
         sosso::FrameClock fFrameClock;
 
     public:
@@ -49,6 +51,16 @@ class JackOSSChannel : public JackRunnableInterface
         {}
         virtual ~JackOSSChannel()
         {}
+
+        bool Lock()
+        {
+            return fMutex.Lock();
+        }
+
+        bool Unlock()
+        {
+            return fMutex.Unlock();
+        }
 
         virtual bool Init();
 
