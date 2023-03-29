@@ -44,6 +44,13 @@ class JackOSSChannel : public JackRunnableInterface
     private:
         JackMutex fMutex;
         sosso::FrameClock fFrameClock;
+        sosso::DoubleBuffer<sosso::ReadChannel> fReadChannel;
+        sosso::DoubleBuffer<sosso::WriteChannel> fWriteChannel;
+        sosso::Correction fCorrection;
+
+        std::int64_t fFrameStamp = 0;
+        std::int64_t fNextWakeup = 0;
+        std::int64_t fXRunGap = 0;
 
     public:
 
@@ -61,6 +68,18 @@ class JackOSSChannel : public JackRunnableInterface
         {
             return fMutex.Unlock();
         }
+
+        bool InitialSetup(unsigned sample_rate);
+
+        bool OpenCapture(const char* device, bool exclusive, int sample_format, int &channels);
+        bool OpenPlayback(const char* device, bool exclusive, int sample_format, int &channels);
+
+        bool StartChannels(unsigned buffer_frames);
+        bool StopChannels();
+
+        bool CheckTimeAndRun();
+
+        bool Sleep() const;
 
         virtual bool Init();
 

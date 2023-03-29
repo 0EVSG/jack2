@@ -9,11 +9,7 @@ namespace sosso {
 class FrameClock {
 public:
   bool init_clock(unsigned sample_rate) {
-    if (sample_rate > 0) {
-      _sample_rate = sample_rate;
-      return init_zero_time();
-    }
-    return false;
+    return set_sample_rate(sample_rate) && init_zero_time();
   }
 
   bool now(std::int64_t &result) const {
@@ -36,6 +32,16 @@ public:
 
   std::int64_t time_to_frames(std::int64_t time_ns) const {
     return (time_ns * _sample_rate) / 1000000000;
+  }
+
+  unsigned sample_rate() const { return _sample_rate; }
+
+  bool set_sample_rate(unsigned sample_rate) {
+    if (sample_rate > 0) {
+      _sample_rate = sample_rate;
+      return true;
+    }
+    return false;
   }
 
 private:

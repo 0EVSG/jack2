@@ -90,6 +90,16 @@ public:
     return 0;
   }
 
+  std::int64_t total_end() const {
+    if (ready()) {
+      if (_buffer_b.buffer.valid()) {
+        return _buffer_b.end_frames + Channel::balance();
+      }
+      return end_frames() + Channel::balance();
+    }
+    return 0;
+  }
+
   std::int64_t wakeup_time(std::int64_t now) const {
     // No need to wake up if channel is not running.
     if (!Channel::is_open()) {

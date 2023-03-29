@@ -42,25 +42,227 @@ using namespace std;
 namespace Jack
 {
 
+bool JackOSSChannel::InitialSetup(unsigned int sample_rate)
+{
+    fFrameStamp = 0;
+    fNextWakeup = 0;
+    fXRunGap = 0;
+    return fFrameClock.set_sample_rate(sample_rate);
+}
+
+bool JackOSSChannel::OpenCapture(const char *device, bool exclusive, int sample_format, int &channels)
+{
+    if (channels == 0) channels = 2;
+
+    if (!fReadChannel.set_parameters(sample_format, fFrameClock.sample_rate(), channels)) {
+        jack_error("JackOSSChannel::OpenCapture unsupported sample format %#x", sample_format);
+        return false;
+    }
+
+    if (!fReadChannel.open(device, exclusive)) {
+        return false;
+    }
+
+    if (fReadChannel.sample_rate() != fFrameClock.sample_rate()) {
+        jack_error("JackOSSChannel::OpenCapture driver forced sample rate %ld", fReadChannel.sample_rate());
+        fReadChannel.close();
+        return false;
+    }
+
+    jack_log("JackOSSChannel::OpenCapture capture file descriptor = %d", fReadChannel.file_descriptor());
+
+    if (fReadChannel.channels() != channels) {
+        channels = fReadChannel.channels();
+        jack_info("JackOSSChannel::OpenCapture driver forced the number of capture channels %ld", channels);
+    }
+
+    fReadChannel.memory_map();
+    fReadChannel.set_target_latency(0);
+
+    return true;
+}
+
+bool JackOSSChannel::OpenPlayback(const char *device, bool exclusive, int sample_format, int &channels)
+{
+    if (channels == 0) channels = 2;
+
+    if (!fWriteChannel.set_parameters(sample_format, fFrameClock.sample_rate(), channels)) {
+        jack_error("JackOSSChannel::OpenPlayback unsupported sample format %#x", sample_format);
+        return false;
+    }
+
+    if (!fWriteChannel.open(device, exclusive)) {
+        return false;
+    }
+
+    if (fWriteChannel.sample_rate() != fFrameClock.sample_rate()) {
+        jack_error("JackOSSChannel::OpenPlayback driver forced sample rate %ld", fWriteChannel.sample_rate());
+        fWriteChannel.close();
+        return false;
+    }
+
+    jack_log("JackOSSChannel::OpenPlayback playback file descriptor = %d", fWriteChannel.file_descriptor());
+
+    if (fWriteChannel.channels() != channels) {
+        channels = fWriteChannel.channels();
+        jack_info("JackOSSChannel::OpenPlayback driver forced the number of playback channels %ld", channels);
+    }
+
+    fWriteChannel.memory_map();
+    fWriteChannel.set_target_latency(0);
+
+    return true;
+}
+
+bool JackOSSChannel::StartChannels(unsigned int buffer_frames)
+{
+    int group_id = 0;
+
+    if (fReadChannel.recording()) {
+        // Allocate two recording buffers for double buffering.
+        size_t buffer_size = buffer_frames * fReadChannel.frame_size();
+        sosso::Buffer buffer((char*) calloc(buffer_size, 1), buffer_size);
+        assert(buffer.data());
+        fReadChannel.set_buffer(std::move(buffer), 0);
+        buffer = sosso::Buffer((char*) calloc(buffer_size, 1), buffer_size);
+        assert(buffer.data());
+        fReadChannel.set_buffer(std::move(buffer), buffer_frames);
+        // Add recording channel to synced start group.
+        fReadChannel.add_to_sync_group(group_id);
+    }
+
+    if (fWriteChannel.playback()) {
+        // Allocate two playback buffers for double buffering.
+        size_t buffer_size = buffer_frames * fWriteChannel.frame_size();
+        sosso::Buffer buffer((char*) calloc(buffer_size, 1), buffer_size);
+        assert(buffer.data());
+        fWriteChannel.set_buffer(std::move(buffer), 0);
+        buffer = sosso::Buffer((char*) calloc(buffer_size, 1), buffer_size);
+        assert(buffer.data());
+        fWriteChannel.set_buffer(std::move(buffer), buffer_frames);
+        // Add playback channel to synced start group.
+        fWriteChannel.add_to_sync_group(group_id);
+    }
+
+    // Start both channels in sync if supported.
+    if (fReadChannel.recording()) {
+        fReadChannel.start_sync_group(group_id);
+    } else {
+        fWriteChannel.start_sync_group(group_id);
+    }
+
+    // Init frame clock here to mark start time.
+    if (!fFrameClock.init_clock(fFrameClock.sample_rate())) {
+        return false;
+    }
+
+    // TODO: Improve correction limits for border cases.
+    std::int64_t limit = buffer_frames / 2;
+    fCorrection.set_loss_limits(-limit, limit);
+    limit = limit / 2;
+    fCorrection.set_drift_limits(-limit, limit);
+
+    return true;
+}
+
+bool JackOSSChannel::StopChannels()
+{
+    if (fReadChannel.recording()) {
+        free(fReadChannel.take_buffer().data());
+        free(fReadChannel.take_buffer().data());
+        fReadChannel.memory_unmap();
+        fReadChannel.close();
+    }
+
+    if (fWriteChannel.playback()) {
+        free(fWriteChannel.take_buffer().data());
+        free(fWriteChannel.take_buffer().data());
+        fWriteChannel.memory_unmap();
+        fWriteChannel.close();
+    }
+
+    return true;
+}
+
+bool JackOSSChannel::CheckTimeAndRun()
+{
+    // Check current frame time.
+    if (!fFrameClock.now(fFrameStamp)) {
+        jack_error("JackOSSChannel::CheckTimeAndRun(): Frame clock failed.");
+        return false;
+    }
+    std::int64_t now = fFrameStamp;
+    // Round frame time down to steppings.
+    now = now - (now % fReadChannel.stepping());
+
+    if (fFrameStamp < fNextWakeup) {
+        return false;
+    }
+
+    // Compute processing gap in case we are late.
+    std::int64_t gap = 0;
+    if (fReadChannel.recording() && fReadChannel.total_end() < now) {
+        gap = std::max(gap, now - fReadChannel.period_end());
+    }
+    if (fWriteChannel.playback() && fWriteChannel.total_end() < now) {
+        gap = std::max(gap, now - fWriteChannel.period_end());
+    }
+    // If late by more than one period, drop it and report an XRun.
+    if (gap > 0) {
+        jack_error("JackOSSChannel::CheckTimeAndRun(): Late by %lld frames.", gap);
+        fXRunGap += gap;
+        fReadChannel.reset_buffers(fReadChannel.end_frames() + gap);
+        fWriteChannel.reset_buffers(fWriteChannel.end_frames() + gap);
+    }
+
+    // Process read channel if wakeup time passed, or OSS buffer data available.
+    if (fReadChannel.recording()) {
+        if (now >= fReadChannel.wakeup_time(fReadChannel.last_processing())) {
+            if (!fReadChannel.process(now)) {
+                jack_error("JackOSSChannel::CheckTimeAndRun(): Read process failed.");
+                return -1;
+            }
+        }
+    }
+    // Process write channel if wakeup time passed, or OSS buffer space available.
+    if (fWriteChannel.playback()) {
+        if (now >= fWriteChannel.wakeup_time(fWriteChannel.last_processing())) {
+            if (!fWriteChannel.process(now)) {
+                jack_error("JackOSSChannel::CheckTimeAndRun(): Write process failed.");
+                return -1;
+            }
+        }
+    }
+
+    fNextWakeup = std::min(fReadChannel.wakeup_time(now), fWriteChannel.wakeup_time(now));
+
+    return true;
+}
+
+bool JackOSSChannel::Sleep() const
+{
+    if (fNextWakeup > fFrameStamp) {
+        return fFrameClock.sleep(fNextWakeup);
+    }
+    return true;
+}
+
 bool JackOSSChannel::Init()
 {
-    if (Lock()) {
-        jack_info("JackOSSChannel::Init() running.");
-        fFrameClock.init_clock(48000);
-        return Unlock();
-    }
-    return false;
+    return true;
 }
 
 bool JackOSSChannel::Execute()
 {
-    if (Lock()) {
-        jack_info("JackOSSChannel::Execute() running.");
-        std::int64_t now = 0;
-        fFrameClock.now(now);
-        if (Unlock()) {
-            fFrameClock.sleep(now + 5 * 48000);
-            return true;
+    if (Lock() && CheckTimeAndRun()) {
+        if (fFrameStamp >= fNextWakeup) {
+            jack_info("JackOSSChannel::Execute() running.");
+            fNextWakeup = fFrameStamp + 5 * 48000;
+            return Unlock();
+        } else {
+            // Unlock mutex before going to sleep, let others process.
+            std::int64_t wakeup = fNextWakeup;
+            return Unlock() && fFrameClock.sleep(wakeup);
         }
     }
     return false;
