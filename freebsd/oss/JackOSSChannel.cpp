@@ -220,7 +220,7 @@ bool JackOSSChannel::CheckTimeAndRun()
         if (now >= fReadChannel.wakeup_time(fReadChannel.last_processing())) {
             if (!fReadChannel.process(now)) {
                 jack_error("JackOSSChannel::CheckTimeAndRun(): Read process failed.");
-                return -1;
+                return false;
             }
         }
     }
@@ -229,7 +229,7 @@ bool JackOSSChannel::CheckTimeAndRun()
         if (now >= fWriteChannel.wakeup_time(fWriteChannel.last_processing())) {
             if (!fWriteChannel.process(now)) {
                 jack_error("JackOSSChannel::CheckTimeAndRun(): Write process failed.");
-                return -1;
+                return false;
             }
         }
     }

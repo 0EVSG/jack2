@@ -59,6 +59,16 @@ class JackOSSChannel : public JackRunnableInterface
         virtual ~JackOSSChannel()
         {}
 
+        sosso::DoubleBuffer<sosso::ReadChannel> &Capture()
+        {
+            return fReadChannel;
+        }
+
+        sosso::DoubleBuffer<sosso::WriteChannel> &Playback()
+        {
+            return fWriteChannel;
+        }
+
         bool Lock()
         {
             return fMutex.Lock();
@@ -84,6 +94,16 @@ class JackOSSChannel : public JackRunnableInterface
         virtual bool Init();
 
         virtual bool Execute();
+
+        std::int64_t XRunGap() const
+        {
+            return fXRunGap;
+        }
+
+        void ClearXRunGap()
+        {
+            fXRunGap = 0;
+        }
 };
 
 } // end of namespace
