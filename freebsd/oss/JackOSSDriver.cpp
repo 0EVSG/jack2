@@ -158,9 +158,9 @@ void JackOSSDriver::DisplayDeviceInfo()
     jack_info("Audio Interface Description :");
 
     if (fPlayback) {
-        int fd = fWriteChannel.file_descriptor();
+        int fd = fChannel.Playback().file_descriptor();
 
-        jack_info("Sampling Frequency : %d, Sample Size : %d", fWriteChannel.sample_rate(), fWriteChannel.bytes_per_sample() * 8);
+        jack_info("Sampling Frequency : %d, Sample Size : %d", fChannel.Playback().sample_rate(), fChannel.Playback().bytes_per_sample() * 8);
 
         oss_sysinfo si;
         if (ioctl(fd, OSS_SYSINFO, &si) == -1) {
@@ -198,9 +198,9 @@ void JackOSSDriver::DisplayDeviceInfo()
     }
 
     if (fCapture) {
-        int fd = fReadChannel.file_descriptor();
+        int fd = fChannel.Capture().file_descriptor();
 
-        jack_info("Sampling Frequency : %d, Sample Size : %d", fReadChannel.sample_rate(), fReadChannel.bytes_per_sample() * 8);
+        jack_info("Sampling Frequency : %d, Sample Size : %d", fChannel.Capture().sample_rate(), fChannel.Capture().bytes_per_sample() * 8);
 
         oss_sysinfo si;
         if (ioctl(fd, OSS_SYSINFO, &si) == -1) {
@@ -236,92 +236,6 @@ void JackOSSDriver::DisplayDeviceInfo()
             if (cap & DSP_CAP_BIND)     jack_info(" DSP_CAP_BIND");
         }
     }
-}
-
-int JackOSSDriver::OpenInput()
-{
-    if (fCaptureChannels == 0) fCaptureChannels = 2;
-
-    if (!fReadChannel.set_parameters(GetSampleFormat(fBits), fEngineControl->fSampleRate, fCaptureChannels)) {
-        jack_error("JackOSSDriver::OpenInput unsupported sample format %#x", GetSampleFormat(fBits));
-        return -1;
-    }
-
-    if (!fReadChannel.open(fCaptureDriverName, fExcl)) {
-        return -1;
-    }
-
-    jack_log("JackOSSDriver::OpenInput input file descriptor = %d", fReadChannel.file_descriptor());
-
-    if (fReadChannel.channels() != fCaptureChannels) {
-        fCaptureChannels = fReadChannel.channels();
-        jack_info("JackOSSDriver::OpenInput driver forced the number of capture channels %ld", fCaptureChannels);
-    }
-
-    fReadChannel.memory_map();
-    fReadChannel.set_target_latency(0);
-
-    // Internal buffer size required for one period.
-    size_t period_bytes = fEngineControl->fBufferSize * fReadChannel.frame_size();
-
-    // Allocate two buffers for double buffering.
-    sosso::Buffer buffer((char*) calloc(period_bytes, 1), period_bytes);
-    assert(buffer.data());
-    fReadChannel.set_buffer(std::move(buffer), 0);
-    buffer = sosso::Buffer((char*) calloc(period_bytes, 1), period_bytes);
-    assert(buffer.data());
-    fReadChannel.set_buffer(std::move(buffer), fEngineControl->fBufferSize);
-
-    if (fReadChannel.sample_rate() != fEngineControl->fSampleRate) {
-        jack_error("JackOSSDriver::OpenInput driver forced sample rate %ld", fReadChannel.sample_rate());
-        fReadChannel.close();
-        return -1;
-    }
-
-    return 0;
-}
-
-int JackOSSDriver::OpenOutput()
-{
-    if (fPlaybackChannels == 0) fPlaybackChannels = 2;
-
-    if (!fWriteChannel.set_parameters(GetSampleFormat(fBits), fEngineControl->fSampleRate, fPlaybackChannels)) {
-        jack_error("JackOSSDriver::OpenOutput unsupported sample format %#x", GetSampleFormat(fBits));
-        return -1;
-    }
-
-    if (!fWriteChannel.open(fPlaybackDriverName, fExcl)) {
-        return -1;
-    }
-
-    jack_log("JackOSSDriver::OpenOutput output file descriptor = %d", fWriteChannel.file_descriptor());
-
-    if (fWriteChannel.channels() != fPlaybackChannels) {
-        fPlaybackChannels = fWriteChannel.channels();
-        jack_info("JackOSSDriver::OpenOutput driver forced the number of playback channels %ld", fPlaybackChannels);
-    }
-
-    fWriteChannel.memory_map();
-    fWriteChannel.set_target_latency(0);
-
-    // Internal buffer size required for one period.
-    size_t period_bytes = fEngineControl->fBufferSize * fWriteChannel.frame_size();
-
-    // Allocate two buffers for double buffering.
-    sosso::Buffer buffer((char*) calloc(period_bytes, 1), period_bytes);
-    assert(buffer.data());
-    fWriteChannel.set_buffer(std::move(buffer), 0);
-    buffer = sosso::Buffer((char*) calloc(period_bytes, 1), period_bytes);
-    assert(buffer.data());
-    fWriteChannel.set_buffer(std::move(buffer), fEngineControl->fBufferSize);
-
-    if (fWriteChannel.sample_rate() != fEngineControl->fSampleRate) {
-        jack_error("JackOSSDriver::OpenOutput driver forced the sample rate %ld", fWriteChannel.sample_rate());
-        fWriteChannel.close();
-        return -1;
-    }
-
-    return 0;
 }
 
 int JackOSSDriver::Open(jack_nframes_t nframes,
@@ -427,44 +341,26 @@ int JackOSSDriver::OpenAux()
 {
     // (Re-)Initialize runtime variables.
     fCycleEnd = 0;
-    fFrameStamp = 0;
-    fNextWakeup = 0;
-    fMaxJackBlocking = 0;
-    fXRunGap = 0;
 
-    int group_id = 0;
-
-    if (fCapture) {
-        if ((OpenInput() < 0)) {
-            return -1;
-        }
-        fReadChannel.add_to_sync_group(group_id);
-    }
-
-    if (fPlayback) {
-        if ((OpenOutput() < 0)) {
-            return -1;
-        }
-        fWriteChannel.add_to_sync_group(group_id);
-    }
-
-    // Start both channels in sync if available.
-    if (fCapture) {
-        fReadChannel.start_sync_group(group_id);
-    } else {
-        fWriteChannel.start_sync_group(group_id);
-    }
-
-    // Init frame clock here to mark start time.
-    if (!fFrameClock.init_clock(fEngineControl->fSampleRate)) {
+    if (!fChannel.InitialSetup(fEngineControl->fSampleRate)) {
         return -1;
     }
 
-    // TODO: Improve correction limits for border cases.
-    std::int64_t limit = fEngineControl->fBufferSize / 2;
-    fCorrection.set_loss_limits(-limit, limit);
-    limit = limit / 2;
-    fCorrection.set_drift_limits(-limit, limit);
+    if (fCapture) {
+        if (!fChannel.OpenCapture(fCaptureDriverName, fExcl, GetSampleFormat(fBits), fCaptureChannels)) {
+            return -1;
+        }
+    }
+
+    if (fPlayback) {
+        if (!fChannel.OpenPlayback(fPlaybackDriverName, fExcl, GetSampleFormat(fBits), fPlaybackChannels)) {
+            return -1;
+        }
+    }
+
+    if (!fChannel.StartChannels(fEngineControl->fBufferSize)) {
+        return -1;
+    }
 
     DisplayDeviceInfo();
 
@@ -477,72 +373,7 @@ int JackOSSDriver::OpenAux()
 void JackOSSDriver::CloseAux()
 {
     fAssistThread.Stop();
-
-    if (fCapture && fReadChannel.recording()) {
-        free(fReadChannel.take_buffer().data());
-        free(fReadChannel.take_buffer().data());
-        fReadChannel.memory_unmap();
-        fReadChannel.close();
-    }
-
-    if (fPlayback && fWriteChannel.playback()) {
-        free(fWriteChannel.take_buffer().data());
-        free(fWriteChannel.take_buffer().data());
-        fWriteChannel.memory_unmap();
-        fWriteChannel.close();
-    }
-}
-
-int JackOSSDriver::CheckTimeAndRun()
-{
-    // Check current frame time.
-    if (!fFrameClock.now(fFrameStamp)) {
-        jack_error("JackOSSDriver::CheckTimeAndRun(): Frame clock failed.");
-        return -1;
-    }
-    std::int64_t now = fFrameStamp;
-    // Round frame time down to steppings.
-    now = now - (now % fReadChannel.stepping());
-
-    // Compute processing gap in case we are late.
-    std::int64_t gap = 0;
-    if (fReadChannel.recording()) {
-        gap = std::max(gap, now - fReadChannel.period_end());
-    }
-    if (fWriteChannel.playback()) {
-        gap = std::max(gap, now - fWriteChannel.period_end());
-    }
-    // If late by more than one period, drop it and report an XRun.
-    if (gap > fEngineControl->fBufferSize) {
-        jack_error("JackOSSDriver::CheckTimeAndRun(): Late by %lld frames.", gap);
-        fXRunGap += gap;
-        fCycleEnd += gap;
-        fReadChannel.reset_buffers(fReadChannel.end_frames() + gap);
-        fWriteChannel.reset_buffers(fWriteChannel.end_frames() + gap);
-    }
-
-    // Process read channel if wakeup time passed, or OSS buffer data available.
-    if (fCapture && fReadChannel.recording()) {
-        if (now >= fReadChannel.wakeup_time(fReadChannel.last_processing())) {
-            if (!fReadChannel.process(now)) {
-                jack_error("JackOSSDriver::CheckTimeAndRun(): Read process failed.");
-                return -1;
-            }
-        }
-    }
-    // Process write channel if wakeup time passed, or OSS buffer space available.
-    if (fPlayback && fWriteChannel.playback()) {
-        if (now >= fWriteChannel.wakeup_time(fWriteChannel.last_processing())) {
-            if (!fWriteChannel.process(now)) {
-                jack_error("JackOSSDriver::CheckTimeAndRun(): Write process failed.");
-                return -1;
-            }
-        }
-    }
-
-    fNextWakeup = std::min(fReadChannel.wakeup_time(now), fWriteChannel.wakeup_time(now));
-
-    return 0;
+    fChannel.StopChannels();
 }
 
 int JackOSSDriver::Read()
@@ -559,52 +390,36 @@ int JackOSSDriver::Read()
     fCycleEnd += fEngineControl->fBufferSize;
 
     // Process read and write channels at least once.
-    std::int64_t previous_stamp = fFrameStamp;
-    if (CheckTimeAndRun() != 0) {
+    if (!fChannel.CheckTimeAndRun()) {
         return -1;
     }
-    // Keep track of maximum time OSS driver is blocked from processing.
-    if (fFrameStamp - previous_stamp > fMaxJackBlocking) {
-        fMaxJackBlocking = fFrameStamp - previous_stamp;
-        jack_info("Max Jack read blocking time is %lld.", fMaxJackBlocking);
-    }
-    // Reset maximum blocking time approximately every 5 seconds.
-    if ((fFrameStamp / fEngineControl->fBufferSize) % ((5 * fEngineControl->fSampleRate) / fEngineControl->fBufferSize) == 0) {
-        fMaxJackBlocking = 0;
-    }
 
-    if (fXRunGap > 0) {
+    if (fChannel.XRunGap() > 0) {
         // TODO: Check if we can map "fFrameStamp" to absolute time in microsecons.
-        NotifyXRun(GetMicroSeconds(), (float)(fFrameClock.frames_to_time(fXRunGap) / 1000));
-        fXRunGap = 0;
+        NotifyXRun(GetMicroSeconds(), (float)(fChannel.FrameClock().frames_to_time(fChannel.XRunGap()) / 1000));
+        fChannel.ClearXRunGap();
     }
 
     // Wait and process channels until read, or else write, buffer is finished.
-    while ((fReadChannel.recording() && !fReadChannel.finished(fFrameStamp)) ||
-           (!fReadChannel.recording() && !fWriteChannel.finished(fFrameStamp))) {
-        if (fNextWakeup > fFrameStamp) {
-            if (fFrameClock.sleep(fNextWakeup)) {
-                fFrameStamp = fNextWakeup;
-            }
-        } else {
-            if (CheckTimeAndRun() != 0) {
-                return -1;
-            }
+    while ((fCapture && !fChannel.CaptureFinished()) ||
+           (!fCapture && !fChannel.PlaybackFinished())) {
+        if (!(fChannel.Sleep() && fChannel.CheckTimeAndRun())) {
+            return -1;
         }
     }
 
     // Keep begin cycle time
     JackDriver::CycleTakeBeginTime();
 
-    if (!fReadChannel.recording()) {
+    if (!fCapture) {
         if (!fChannel.Unlock()) {
             return -1;
         }
         return 0;
     }
 
-    if ((fFrameStamp / fEngineControl->fBufferSize) % ((5 * fEngineControl->fSampleRate) / fEngineControl->fBufferSize) == 0) {
-        fReadChannel.log_state(fFrameStamp);
+    if ((fChannel.FrameStamp() / fEngineControl->fBufferSize) % ((5 * fEngineControl->fSampleRate) / fEngineControl->fBufferSize) == 0) {
+        fChannel.Capture().log_state(fChannel.FrameStamp());
     }
 
 #ifdef JACK_MONITOR
@@ -612,31 +427,31 @@ int JackOSSDriver::Read()
 #endif
 
     // Get buffer from read channel.
-    sosso::Buffer buffer = fReadChannel.take_buffer();
+    sosso::Buffer buffer = fChannel.Capture().take_buffer();
 
     for (int i = 0; i < fCaptureChannels; i++) {
         if (fGraphManager->GetConnectionsNum(fCapturePortList[i]) > 0) {
-            CopyAndConvertIn(GetInputBuffer(i), buffer.data(), fEngineControl->fBufferSize, i, fCaptureChannels, fReadChannel.bytes_per_sample() * 8);
+            CopyAndConvertIn(GetInputBuffer(i), buffer.data(), fEngineControl->fBufferSize, i, fCaptureChannels, fChannel.Capture().bytes_per_sample() * 8);
         }
     }
     buffer.reset();
 
-    fReadChannel.set_buffer(std::move(buffer), fCycleEnd + fEngineControl->fBufferSize);
+    fChannel.Capture().set_buffer(std::move(buffer), fCycleEnd + fEngineControl->fBufferSize);
 
 #ifdef JACK_MONITOR
     gCycleTable.fTable[gCycleCount].fAfterReadConvert = GetMicroSeconds();
 #endif
 
-    if (!fChannel.Unlock()) {
+    if (!(fChannel.CheckTimeAndRun() && fChannel.Unlock())) {
         return -1;
     }
 
-    return CheckTimeAndRun();
+    return 0;
 }
 
 int JackOSSDriver::Write()
 {
-    if (!fWriteChannel.playback()) {
+    if (!fPlayback) {
         return 0;
     }
 
@@ -645,65 +460,45 @@ int JackOSSDriver::Write()
     }
 
     // Process read and write channels at least once.
-    std::int64_t previous_stamp = fFrameStamp;
-    if (CheckTimeAndRun() != 0) {
+    if (fChannel.CheckTimeAndRun()) {
         return -1;
-    }
-    // Keep track of maximum time OSS driver is blocked from processing.
-    if (fFrameStamp - previous_stamp > fMaxJackBlocking) {
-        fMaxJackBlocking = fFrameStamp - previous_stamp;
-        jack_info("Max Jack write blocking time is %lld.", fMaxJackBlocking);
     }
 
     // Wait and process channels until write buffer is finished.
-    while (!fWriteChannel.finished(fFrameStamp)) {
-        if (fNextWakeup > fFrameStamp) {
-            if (fFrameClock.sleep(fNextWakeup)) {
-                fFrameStamp = fNextWakeup;
-            }
-        } else {
-            if (CheckTimeAndRun() != 0) {
-                return -1;
-            }
+    while (!fChannel.PlaybackFinished()) {
+        if (!(fChannel.Sleep() && fChannel.CheckTimeAndRun())) {
+            return -1;
         }
     }
 
-    if ((fFrameStamp / fEngineControl->fBufferSize) % ((5 * fEngineControl->fSampleRate) / fEngineControl->fBufferSize) == 0) {
-        fWriteChannel.log_state(fFrameStamp);
+    if ((fChannel.FrameStamp() / fEngineControl->fBufferSize) % ((5 * fEngineControl->fSampleRate) / fEngineControl->fBufferSize) == 0) {
+        fChannel.Playback().log_state(fChannel.FrameStamp());
     }
 
 #ifdef JACK_MONITOR
     gCycleTable.fTable[gCycleCount].fBeforeWriteConvert = GetMicroSeconds();
 #endif
 
-    sosso::Buffer buffer = fWriteChannel.take_buffer();
+    sosso::Buffer buffer = fChannel.Playback().take_buffer();
 
     memset(buffer.data(), 0, buffer.length());
     buffer.reset();
     for (int i = 0; i < fPlaybackChannels; i++) {
         if (fGraphManager->GetConnectionsNum(fPlaybackPortList[i]) > 0) {
-            CopyAndConvertOut(buffer.data(), GetOutputBuffer(i), fEngineControl->fBufferSize, i, fPlaybackChannels, fWriteChannel.bytes_per_sample() * 8);
+            CopyAndConvertOut(buffer.data(), GetOutputBuffer(i), fEngineControl->fBufferSize, i, fPlaybackChannels, fChannel.Playback().bytes_per_sample() * 8);
         }
     }
 
-    // If both channels are used, correct drift relative to recording balance.
-    if (fReadChannel.recording()) {
-        std::int64_t old_correction = fCorrection.correction();
-        fCorrection.correct(fWriteChannel.balance(), fReadChannel.balance());
-        if (fCorrection.correction() != old_correction) {
-            jack_info("Playback correction changed from %lld to %lld.", old_correction, fCorrection.correction());
-            jack_info("Read balance %lld vs write balance %lld.", fReadChannel.balance(), fWriteChannel.balance());
-        }
-    }
-
-    fWriteChannel.set_buffer(std::move(buffer), fCycleEnd + fEngineControl->fBufferSize + fCorrection.correction());
+    std::int64_t buffer_end = fCycleEnd + fEngineControl->fBufferSize;
+    buffer_end += fChannel.PlaybackCorrection();
+    fChannel.Playback().set_buffer(std::move(buffer), buffer_end);
 
 #ifdef JACK_MONITOR
     gCycleTable.fTable[gCycleCount].fBeforeWrite = GetMicroSeconds();
 #endif
 
     // Do a processing step here.
-    if (CheckTimeAndRun() != 0) {
+    if (!fChannel.CheckTimeAndRun()) {
         return -1;
     }
 

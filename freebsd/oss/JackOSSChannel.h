@@ -69,6 +69,11 @@ class JackOSSChannel : public JackRunnableInterface
             return fWriteChannel;
         }
 
+        sosso::FrameClock &FrameClock()
+        {
+            return fFrameClock;
+        }
+
         bool Lock()
         {
             return fMutex.Lock();
@@ -91,6 +96,11 @@ class JackOSSChannel : public JackRunnableInterface
 
         bool Sleep() const;
 
+        bool CaptureFinished() const;
+        bool PlaybackFinished() const;
+
+        std::int64_t PlaybackCorrection();
+
         virtual bool Init();
 
         virtual bool Execute();
@@ -103,6 +113,11 @@ class JackOSSChannel : public JackRunnableInterface
         void ClearXRunGap()
         {
             fXRunGap = 0;
+        }
+
+        std::int64_t FrameStamp() const
+        {
+            return fFrameStamp;
         }
 };
 

@@ -47,6 +47,7 @@ bool JackOSSChannel::InitialSetup(unsigned int sample_rate)
     fFrameStamp = 0;
     fNextWakeup = 0;
     fXRunGap = 0;
+    fCorrection.clear();
     return fFrameClock.set_sample_rate(sample_rate);
 }
 
@@ -245,6 +246,31 @@ bool JackOSSChannel::Sleep() const
         return fFrameClock.sleep(fNextWakeup);
     }
     return true;
+}
+
+bool JackOSSChannel::CaptureFinished() const
+{
+    return fReadChannel.finished(fFrameStamp);
+}
+
+bool JackOSSChannel::PlaybackFinished() const
+{
+    return fWriteChannel.finished(fFrameStamp);
+}
+
+std::int64_t JackOSSChannel::PlaybackCorrection()
+{
+    std::int64_t correction = 0;
+    // If both channels are used, correct drift relative to recording balance.
+    if (fReadChannel.recording() && fWriteChannel.playback()) {
+        std::int64_t previous = fCorrection.correction();
+        correction = fCorrection.correct(fWriteChannel.balance(), fReadChannel.balance());
+        if (correction != previous) {
+            jack_info("Playback correction changed from %lld to %lld.", previous, correction);
+            jack_info("Read balance %lld vs write balance %lld.", fReadChannel.balance(), fWriteChannel.balance());
+        }
+    }
+    return correction;
 }
 
 bool JackOSSChannel::Init()

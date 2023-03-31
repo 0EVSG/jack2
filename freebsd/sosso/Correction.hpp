@@ -45,6 +45,10 @@ public:
     return _correction;
   }
 
+  void clear() {
+    _correction = 0;
+  }
+
 private:
   std::int64_t _loss_min = -128;
   std::int64_t _loss_max = 128;
