@@ -50,7 +50,6 @@ class JackOSSChannel : public JackRunnableInterface
 
         std::int64_t fFrameStamp = 0;
         std::int64_t fNextWakeup = 0;
-        std::int64_t fXRunGap = 0;
 
     public:
 
@@ -105,15 +104,7 @@ class JackOSSChannel : public JackRunnableInterface
 
         virtual bool Execute();
 
-        std::int64_t XRunGap() const
-        {
-            return fXRunGap;
-        }
-
-        void ClearXRunGap()
-        {
-            fXRunGap = 0;
-        }
+        std::int64_t XRunGap() const;
 
         std::int64_t FrameStamp() const
         {

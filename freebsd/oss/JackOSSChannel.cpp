@@ -46,7 +46,6 @@ bool JackOSSChannel::InitialSetup(unsigned int sample_rate)
 {
     fFrameStamp = 0;
     fNextWakeup = 0;
-    fXRunGap = 0;
     fCorrection.clear();
     return fFrameClock.set_sample_rate(sample_rate);
 }
@@ -200,22 +199,6 @@ bool JackOSSChannel::CheckTimeAndRun()
         return true;
     }
 
-    // Compute processing gap in case we are late.
-    std::int64_t gap = 0;
-    if (fReadChannel.recording() && fReadChannel.total_end() < now) {
-        gap = std::max(gap, now - fReadChannel.period_end());
-    }
-    if (fWriteChannel.playback() && fWriteChannel.total_end() < now) {
-        gap = std::max(gap, now - fWriteChannel.period_end());
-    }
-    // If late by more than one period, drop it and report an XRun.
-    if (gap > 0) {
-        jack_error("JackOSSChannel::CheckTimeAndRun(): Late by %lld frames.", gap);
-        fXRunGap += gap;
-        fReadChannel.reset_buffers(fReadChannel.end_frames() + gap);
-        fWriteChannel.reset_buffers(fWriteChannel.end_frames() + gap);
-    }
-
     // Process read channel if wakeup time passed, or OSS buffer data available.
     if (fReadChannel.recording()) {
         if (now >= fReadChannel.wakeup_time(fReadChannel.last_processing())) {
@@ -292,6 +275,16 @@ bool JackOSSChannel::Execute()
         }
     }
     return false;
+}
+
+std::int64_t JackOSSChannel::XRunGap() const
+{
+    // Compute processing gap in case we are late.
+    std::int64_t max_end = std::max(fReadChannel.total_end(), fWriteChannel.total_end());
+    if (max_end < fFrameStamp) {
+        return fFrameStamp - max_end;
+    }
+    return 0;
 }
 
 } // end of namespace
