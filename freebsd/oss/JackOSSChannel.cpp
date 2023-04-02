@@ -197,7 +197,7 @@ bool JackOSSChannel::CheckTimeAndRun()
     now = now - (now % fReadChannel.stepping());
 
     if (fFrameStamp < fNextWakeup) {
-        return false;
+        return true;
     }
 
     // Compute processing gap in case we are late.

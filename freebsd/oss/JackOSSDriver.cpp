@@ -460,7 +460,7 @@ int JackOSSDriver::Write()
     }
 
     // Process read and write channels at least once.
-    if (fChannel.CheckTimeAndRun()) {
+    if (!fChannel.CheckTimeAndRun()) {
         return -1;
     }
 
