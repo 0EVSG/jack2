@@ -194,13 +194,14 @@ bool JackOSSChannel::CheckTimeAndRun()
     std::int64_t now = fFrameStamp;
     // Round frame time down to steppings.
     now = now - (now % fReadChannel.stepping());
+    fFrameStamp = now;
 
     if (fFrameStamp < fNextWakeup) {
         return true;
     }
 
     // Process read channel if wakeup time passed, or OSS buffer data available.
-    if (fReadChannel.recording()) {
+    if (fReadChannel.recording() && !fReadChannel.total_finished(now)) {
         if (now >= fReadChannel.wakeup_time(fReadChannel.last_processing())) {
             if (!fReadChannel.process(now)) {
                 jack_error("JackOSSChannel::CheckTimeAndRun(): Read process failed.");
@@ -209,7 +210,7 @@ bool JackOSSChannel::CheckTimeAndRun()
         }
     }
     // Process write channel if wakeup time passed, or OSS buffer space available.
-    if (fWriteChannel.playback()) {
+    if (fWriteChannel.playback() && !fWriteChannel.total_finished(now)) {
         if (now >= fWriteChannel.wakeup_time(fWriteChannel.last_processing())) {
             if (!fWriteChannel.process(now)) {
                 jack_error("JackOSSChannel::CheckTimeAndRun(): Write process failed.");
@@ -265,8 +266,6 @@ bool JackOSSChannel::Execute()
 {
     if (Lock() && CheckTimeAndRun()) {
         if (fFrameStamp >= fNextWakeup) {
-            jack_info("JackOSSChannel::Execute() running.");
-            fNextWakeup = fFrameStamp + 5 * 48000;
             return Unlock();
         } else {
             // Unlock mutex before going to sleep, let others process.

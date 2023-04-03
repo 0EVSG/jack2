@@ -129,6 +129,11 @@ public:
     return period_end() <= now && _buffer_a.buffer.remaining() == 0;
   }
 
+  bool total_finished(std::int64_t now) const {
+    return total_end() <= now && _buffer_a.buffer.remaining() == 0 &&
+           _buffer_b.buffer.remaining() == 0;
+  }
+
   void log_state(std::int64_t now) const {
     const char *direction = Channel::playback() ? "Out" : "In";
     const char *sync = (Channel::last_sync() == now) ? "sync" : "frame";
