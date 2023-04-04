@@ -270,6 +270,11 @@ int JackOSSDriver::OpenAux()
     if (fAssistThread.Start() < 0) {
         return -1;
     }
+    if (fEngineControl->fRealTime) {
+        if (fAssistThread.AcquireRealTime(fEngineControl->fServerPriority) < 0) {
+            jack_error("JackOSSDriver::OpenAux assist thread realtime priority failed.");
+        }
+    }
     return 0;
 }
 
