@@ -148,96 +148,6 @@ static inline void CopyAndConvertOut(void *dst, jack_sample_t *src, size_t nfram
     }
 }
 
-void JackOSSDriver::DisplayDeviceInfo()
-{
-    audio_buf_info info;
-    memset(&info, 0, sizeof(audio_buf_info));
-    int cap = 0;
-
-    // Duplex cards : http://manuals.opensound.com/developer/full_duplex.html
-    jack_info("Audio Interface Description :");
-
-    if (fPlayback) {
-        int fd = fChannel.Playback().file_descriptor();
-
-        jack_info("Sampling Frequency : %d, Sample Size : %d", fChannel.Playback().sample_rate(), fChannel.Playback().bytes_per_sample() * 8);
-
-        oss_sysinfo si;
-        if (ioctl(fd, OSS_SYSINFO, &si) == -1) {
-            jack_error("JackOSSDriver::DisplayDeviceInfo OSS_SYSINFO failed : %s@%i, errno = %d", __FILE__, __LINE__, errno);
-        } else {
-            jack_info("OSS product %s", si.product);
-            jack_info("OSS version %s", si.version);
-            jack_info("OSS version num %d", si.versionnum);
-            jack_info("OSS numaudios %d", si.numaudios);
-            jack_info("OSS numaudioengines %d", si.numaudioengines);
-            jack_info("OSS numcards %d", si.numcards);
-        }
-
-        jack_info("Output capabilities - %d channels : ", fPlaybackChannels);
-
-        if (ioctl(fd, SNDCTL_DSP_GETOSPACE, &info) == -1)  {
-            jack_error("JackOSSDriver::DisplayDeviceInfo SNDCTL_DSP_GETOSPACE failed : %s@%i, errno = %d", __FILE__, __LINE__, errno);
-        } else {
-            jack_info("output space info: fragments = %d, fragstotal = %d, fragsize = %d, bytes = %d",
-                info.fragments, info.fragstotal, info.fragsize, info.bytes);
-        }
-
-        if (ioctl(fd, SNDCTL_DSP_GETCAPS, &cap) == -1)  {
-            jack_error("JackOSSDriver::DisplayDeviceInfo SNDCTL_DSP_GETCAPS failed : %s@%i, errno = %d", __FILE__, __LINE__, errno);
-        } else {
-            if (cap & DSP_CAP_DUPLEX)   jack_info(" DSP_CAP_DUPLEX");
-            if (cap & DSP_CAP_REALTIME) jack_info(" DSP_CAP_REALTIME");
-            if (cap & DSP_CAP_BATCH)    jack_info(" DSP_CAP_BATCH");
-            if (cap & DSP_CAP_COPROC)   jack_info(" DSP_CAP_COPROC");
-            if (cap & DSP_CAP_TRIGGER)  jack_info(" DSP_CAP_TRIGGER");
-            if (cap & DSP_CAP_MMAP)     jack_info(" DSP_CAP_MMAP");
-            if (cap & DSP_CAP_MULTI)    jack_info(" DSP_CAP_MULTI");
-            if (cap & DSP_CAP_BIND)     jack_info(" DSP_CAP_BIND");
-        }
-    }
-
-    if (fCapture) {
-        int fd = fChannel.Capture().file_descriptor();
-
-        jack_info("Sampling Frequency : %d, Sample Size : %d", fChannel.Capture().sample_rate(), fChannel.Capture().bytes_per_sample() * 8);
-
-        oss_sysinfo si;
-        if (ioctl(fd, OSS_SYSINFO, &si) == -1) {
-            jack_error("JackOSSDriver::DisplayDeviceInfo OSS_SYSINFO failed : %s@%i, errno = %d", __FILE__, __LINE__, errno);
-        } else {
-            jack_info("OSS product %s", si.product);
-            jack_info("OSS version %s", si.version);
-            jack_info("OSS version num %d", si.versionnum);
-            jack_info("OSS numaudios %d", si.numaudios);
-            jack_info("OSS numaudioengines %d", si.numaudioengines);
-            jack_info("OSS numcards %d", si.numcards);
-        }
-
-        jack_info("Input capabilities - %d channels : ", fCaptureChannels);
-
-        if (ioctl(fd, SNDCTL_DSP_GETISPACE, &info) == -1) {
-            jack_error("JackOSSDriver::DisplayDeviceInfo SNDCTL_DSP_GETOSPACE failed : %s@%i, errno = %d", __FILE__, __LINE__, errno);
-        } else {
-            jack_info("input space info: fragments = %d, fragstotal = %d, fragsize = %d, bytes = %d",
-                info.fragments, info.fragstotal, info.fragsize, info.bytes);
-        }
-
-        if (ioctl(fd, SNDCTL_DSP_GETCAPS, &cap) == -1) {
-            jack_error("JackOSSDriver::DisplayDeviceInfo SNDCTL_DSP_GETCAPS failed : %s@%i, errno = %d", __FILE__, __LINE__, errno);
-        } else {
-            if (cap & DSP_CAP_DUPLEX)   jack_info(" DSP_CAP_DUPLEX");
-            if (cap & DSP_CAP_REALTIME) jack_info(" DSP_CAP_REALTIME");
-            if (cap & DSP_CAP_BATCH)    jack_info(" DSP_CAP_BATCH");
-            if (cap & DSP_CAP_COPROC)   jack_info(" DSP_CAP_COPROC");
-            if (cap & DSP_CAP_TRIGGER)  jack_info(" DSP_CAP_TRIGGER");
-            if (cap & DSP_CAP_MMAP)     jack_info(" DSP_CAP_MMAP");
-            if (cap & DSP_CAP_MULTI)    jack_info(" DSP_CAP_MULTI");
-            if (cap & DSP_CAP_BIND)     jack_info(" DSP_CAP_BIND");
-        }
-    }
-}
-
 int JackOSSDriver::Open(jack_nframes_t nframes,
                         int user_nperiods,
                         jack_nframes_t samplerate,
@@ -362,7 +272,12 @@ int JackOSSDriver::OpenAux()
         return -1;
     }
 
-    DisplayDeviceInfo();
+    if (fCapture) {
+        fChannel.Capture().log_device_info();
+    }
+    if (fPlayback) {
+        fChannel.Playback().log_device_info();
+    }
 
     if (fAssistThread.Start() < 0) {
         return -1;

@@ -17,11 +17,14 @@ class Device {
 public:
   static std::size_t bytes_per_sample(int format) {
     switch (format) {
-    case AFMT_S16_NE:
+    case AFMT_S16_LE:
+    case AFMT_S16_BE:
       return 2;
-    case AFMT_S24_NE:
+    case AFMT_S24_LE:
+    case AFMT_S24_BE:
       return 3;
-    case AFMT_S32_NE:
+    case AFMT_S32_LE:
+    case AFMT_S32_BE:
       return 4;
     default:
       return 0;
@@ -319,8 +322,21 @@ public:
     return (_capabilities & capability) != 0;
   }
 
-  void log_capabilities() const {
-    Log::info(SOSSO_LOC, "Channel capabilities:");
+  void log_device_info() const {
+    if (!is_open()) {
+      return;
+    }
+    const char *direction = (recording() ? "Recording" : "Playback");
+    Log::info(SOSSO_LOC, "%s device is %u channels at %u Hz, %lu bits.",
+              direction, _channels, _sample_rate, bytes_per_sample() * 8);
+    Log::info(SOSSO_LOC, "Device buffer is %u fragments of size %u, %u frames.",
+              _fragments, _fragment_size, buffer_frames());
+    oss_sysinfo sys_info = {};
+    if (ioctl(_fd, SNDCTL_SYSINFO, &sys_info) == 0) {
+      Log::info(SOSSO_LOC, "OSS version %s number %d on %s.", sys_info.version,
+                sys_info.versionnum, sys_info.product);
+    }
+    Log::info(SOSSO_LOC, "PCM capabilities:");
     if (has_capability(PCM_CAP_TRIGGER))
       Log::info(SOSSO_LOC, "  PCM_CAP_TRIGGER (Trigger start)");
     if (has_capability(PCM_CAP_MMAP))
@@ -409,8 +425,6 @@ private:
     if (ioctl(_fd, request, &info) >= 0) {
       _fragments = info.fragstotal;
       _fragment_size = info.fragsize;
-      Log::info(SOSSO_LOC, "Buffer is %u fragments of size %u, %u frames.",
-                _fragments, _fragment_size, buffer_frames());
       return true;
     } else {
       Log::warn(SOSSO_LOC, "Unable to get buffer info.");
