@@ -39,6 +39,18 @@ Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 
 using namespace std;
 
+void sosso::Log::log(sosso::SourceLocation location, const char* message) {
+    jack_log(message);
+}
+
+void sosso::Log::info(sosso::SourceLocation location, const char* message) {
+    jack_info(message);
+}
+
+void sosso::Log::warn(sosso::SourceLocation location, const char* message) {
+    jack_error(message);
+}
+
 namespace Jack
 {
 

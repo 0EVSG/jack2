@@ -59,18 +59,6 @@ int GetSampleFormat(int bits)
 
 }
 
-void sosso::Log::log(sosso::SourceLocation location, const char* message) {
-    jack_log(message);
-}
-
-void sosso::Log::info(sosso::SourceLocation location, const char* message) {
-    jack_info(message);
-}
-
-void sosso::Log::warn(sosso::SourceLocation location, const char* message) {
-    jack_error(message);
-}
-
 namespace Jack
 {
 
@@ -317,7 +305,7 @@ int JackOSSDriver::Read()
         jack_time_t frame_us = fChannel.FrameClock().frames_to_absolute_us(fChannel.FrameStamp());
         NotifyXRun(time_us, (float)(fChannel.FrameClock().frames_to_time(skip) / 1000));
         fCycleEnd += skip;
-        jack_error("JackOSSDriver::Read(): Late by %lld frames, XRun. Time vs Frame %lu us.", skip, time_us - frame_us);
+        jack_error("JackOSSDriver::Read(): Late by %lld frames, XRun. Time %lu vs Frame %lu us.", skip, time_us, frame_us);
         fChannel.Capture().reset_buffers(fChannel.Capture().end_frames() + skip);
         fChannel.Playback().reset_buffers(fChannel.Playback().end_frames() + skip);
     }
