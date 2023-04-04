@@ -34,6 +34,11 @@ public:
     return (time_ns * _sample_rate) / 1000000000;
   }
 
+  std::int64_t frames_to_absolute_us(std::int64_t frames) const {
+    return _zero.tv_sec * 1000000 + _zero.tv_nsec / 1000 +
+           frames_to_time(frames);
+  }
+
   unsigned sample_rate() const { return _sample_rate; }
 
   bool set_sample_rate(unsigned sample_rate) {
