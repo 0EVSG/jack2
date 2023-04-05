@@ -352,6 +352,7 @@ int JackOSSDriver::Read()
     buffer.reset();
 
     fChannel.Capture().set_buffer(std::move(buffer), fCycleEnd + fEngineControl->fBufferSize);
+    fChannel.SignalWork();
 
 #ifdef JACK_MONITOR
     gCycleTable.fTable[gCycleCount].fAfterReadConvert = GetMicroSeconds();
@@ -407,6 +408,7 @@ int JackOSSDriver::Write()
     std::int64_t buffer_end = fCycleEnd + fEngineControl->fBufferSize;
     buffer_end += fChannel.PlaybackCorrection();
     fChannel.Playback().set_buffer(std::move(buffer), buffer_end);
+    fChannel.SignalWork();
 
 #ifdef JACK_MONITOR
     gCycleTable.fTable[gCycleCount].fBeforeWrite = GetMicroSeconds();

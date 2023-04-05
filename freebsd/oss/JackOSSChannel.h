@@ -42,7 +42,7 @@ class JackOSSChannel : public JackRunnableInterface
 {
 
     private:
-        JackMutex fMutex;
+        JackProcessSync fMutex;
         sosso::FrameClock fFrameClock;
         sosso::DoubleBuffer<sosso::ReadChannel> fReadChannel;
         sosso::DoubleBuffer<sosso::WriteChannel> fWriteChannel;
@@ -81,6 +81,11 @@ class JackOSSChannel : public JackRunnableInterface
         bool Unlock()
         {
             return fMutex.Unlock();
+        }
+
+        void SignalWork()
+        {
+            fMutex.SignalAll();
         }
 
         bool InitialSetup(unsigned sample_rate);

@@ -277,6 +277,12 @@ bool JackOSSChannel::Init()
 bool JackOSSChannel::Execute()
 {
     if (Lock() && CheckTimeAndRun()) {
+        if (fReadChannel.total_finished(fFrameStamp) && fWriteChannel.total_finished(fFrameStamp)) {
+            jack_info("JackOSSChannel::Execute waiting for work.");
+            fMutex.Wait();
+            jack_info("JackOSSChannel::Execute resuming work.");
+            return Unlock();
+        }
         if (fFrameStamp >= fNextWakeup) {
             return Unlock();
         } else {
