@@ -33,6 +33,8 @@ public:
 
   ~Device() { close(); }
 
+  int sample_format() const { return _sample_format; }
+
   std::size_t bytes_per_sample() const {
     return bytes_per_sample(_sample_format);
   }

@@ -20,14 +20,11 @@ Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 
 #include "driver_interface.h"
 #include "JackThreadedDriver.h"
-#include "JackDriverLoader.h"
 #include "JackOSSDriver.h"
 #include "JackEngineControl.h"
 #include "JackGraphManager.h"
 #include "JackError.h"
 #include "JackTime.h"
-#include "JackShmMem.h"
-#include "memops.h"
 
 #include <sys/ioctl.h>
 #include <sys/soundcard.h>
@@ -64,56 +61,6 @@ OSSCycleTable gCycleTable;
 int gCycleCount = 0;
 
 #endif
-
-static inline void CopyAndConvertIn(jack_sample_t *dst, void *src, size_t nframes, int channel, int chcount, int bits)
-{
-    switch (bits) {
-
-        case 16: {
-            signed short *s16src = (signed short*)src;
-            s16src += channel;
-            sample_move_dS_s16(dst, (char*)s16src, nframes, chcount<<1);
-            break;
-        }
-        case 24: {
-            char *s24src = (char*)src;
-            s24src += channel * 3;
-            sample_move_dS_s24(dst, s24src, nframes, chcount*3);
-            break;
-        }
-        case 32: {
-            signed int *s32src = (signed int*)src;
-            s32src += channel;
-            sample_move_dS_s32u24(dst, (char*)s32src, nframes, chcount<<2);
-            break;
-        }
-    }
-}
-
-static inline void CopyAndConvertOut(void *dst, jack_sample_t *src, size_t nframes, int channel, int chcount, int bits)
-{
-    switch (bits) {
-
-        case 16: {
-            signed short *s16dst = (signed short*)dst;
-            s16dst += channel;
-            sample_move_d16_sS((char*)s16dst, src, nframes, chcount<<1, NULL); // No dithering for now...
-            break;
-        }
-        case 24: {
-            char *s24dst = (char*)dst;
-            s24dst += channel * 3;
-            sample_move_d24_sS(s24dst, src, nframes, chcount*3, NULL);
-            break;
-        }
-        case 32: {
-            signed int *s32dst = (signed int*)dst;
-            s32dst += channel;
-            sample_move_d32u24_sS((char*)s32dst, src, nframes, chcount<<2, NULL);
-            break;
-        }
-    }
-}
 
 int JackOSSDriver::Open(jack_nframes_t nframes,
                         int user_nperiods,
@@ -246,6 +193,10 @@ int JackOSSDriver::OpenAux()
         fChannel.Playback().log_device_info();
     }
 
+    if (size_t max_channels = std::max(fCaptureChannels, fPlaybackChannels)) {
+        fSampleBuffers = new jack_sample_t * [max_channels];
+    }
+
     if (fAssistThread.Start() < 0) {
         return -1;
     }
@@ -261,6 +212,11 @@ void JackOSSDriver::CloseAux()
 {
     fAssistThread.Stop();
     fChannel.StopChannels();
+
+    if (fSampleBuffers) {
+        delete[] fSampleBuffers;
+        fSampleBuffers = nullptr;
+    }
 }
 
 int JackOSSDriver::Read()
@@ -320,18 +276,16 @@ int JackOSSDriver::Read()
     gCycleTable.fTable[gCycleCount].fAfterRead = GetMicroSeconds();
 #endif
 
-    // Get buffer from read channel.
-    sosso::Buffer buffer = fChannel.Capture().take_buffer();
-
     for (int i = 0; i < fCaptureChannels; i++) {
+        fSampleBuffers[i] = nullptr;
         if (fGraphManager->GetConnectionsNum(fCapturePortList[i]) > 0) {
-            CopyAndConvertIn(GetInputBuffer(i), buffer.data(), fEngineControl->fBufferSize, i, fCaptureChannels, fChannel.Capture().bytes_per_sample() * 8);
+            fSampleBuffers[i] = GetInputBuffer(i);
         }
     }
-    buffer.reset();
-
-    fChannel.Capture().set_buffer(std::move(buffer), fCycleEnd + fEngineControl->fBufferSize);
-    fChannel.SignalWork();
+    std::int64_t buffer_end = fCycleEnd + fEngineControl->fBufferSize;
+    if (!fChannel.Read(fSampleBuffers, fEngineControl->fBufferSize, buffer_end)) {
+        return -1;
+    }
 
 #ifdef JACK_MONITOR
     gCycleTable.fTable[gCycleCount].fAfterReadConvert = GetMicroSeconds();
@@ -374,20 +328,16 @@ int JackOSSDriver::Write()
     gCycleTable.fTable[gCycleCount].fBeforeWriteConvert = GetMicroSeconds();
 #endif
 
-    sosso::Buffer buffer = fChannel.Playback().take_buffer();
-
-    memset(buffer.data(), 0, buffer.length());
-    buffer.reset();
     for (int i = 0; i < fPlaybackChannels; i++) {
+        fSampleBuffers[i] = nullptr;
         if (fGraphManager->GetConnectionsNum(fPlaybackPortList[i]) > 0) {
-            CopyAndConvertOut(buffer.data(), GetOutputBuffer(i), fEngineControl->fBufferSize, i, fPlaybackChannels, fChannel.Playback().bytes_per_sample() * 8);
+            fSampleBuffers[i] = GetOutputBuffer(i);
         }
     }
-
     std::int64_t buffer_end = fCycleEnd + fEngineControl->fBufferSize;
-    buffer_end += fChannel.PlaybackCorrection();
-    fChannel.Playback().set_buffer(std::move(buffer), buffer_end);
-    fChannel.SignalWork();
+    if (!fChannel.Write(fSampleBuffers, fEngineControl->fBufferSize, buffer_end)) {
+        return -1;
+    }
 
 #ifdef JACK_MONITOR
     gCycleTable.fTable[gCycleCount].fBeforeWrite = GetMicroSeconds();

@@ -58,16 +58,13 @@ class JackOSSDriver : public JackAudioDriver
         bool fIgnoreHW;
 
         std::int64_t fCycleEnd;
+        jack_sample_t** fSampleBuffers;
 
         JackOSSChannel fChannel;
         JackThread fAssistThread;
 
-        int OpenInput();
-        int OpenOutput();
         int OpenAux();
         void CloseAux();
-        void DisplayDeviceInfo();
-        int CheckTimeAndRun();
 
     protected:
         virtual void UpdateLatencies();
@@ -78,7 +75,7 @@ class JackOSSDriver : public JackAudioDriver
                 : JackAudioDriver(name, alias, engine, table),
                 fBits(0),
                 fNperiods(0), fCapture(false), fPlayback(false), fExcl(false), fIgnoreHW(true),
-                fCycleEnd(0), fAssistThread(&fChannel)
+                fCycleEnd(0), fSampleBuffers(nullptr), fAssistThread(&fChannel)
         {}
 
         virtual ~JackOSSDriver()

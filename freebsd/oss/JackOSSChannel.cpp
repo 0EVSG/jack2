@@ -29,6 +29,8 @@ Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 #include <assert.h>
 #include <stdio.h>
 
+typedef jack_default_audio_sample_t jack_sample_t;
+
 namespace
 {
 
@@ -45,6 +47,56 @@ int SuggestSampleFormat(int bits)
         case 16:
         default:
             return AFMT_S16_NE;
+    }
+}
+
+static inline void CopyAndConvertIn(jack_sample_t *dst, void *src, size_t nframes, int channel, int chcount, int format)
+{
+    switch (format) {
+
+        case AFMT_S16_NE: {
+            signed short *s16src = (signed short*)src;
+            s16src += channel;
+            sample_move_dS_s16(dst, (char*)s16src, nframes, chcount * 2);
+            break;
+        }
+        case AFMT_S24_NE: {
+            char *s24src = (char*)src;
+            s24src += channel * 3;
+            sample_move_dS_s24(dst, s24src, nframes, chcount * 3);
+            break;
+        }
+        case AFMT_S32_NE: {
+            signed int *s32src = (signed int*)src;
+            s32src += channel;
+            sample_move_dS_s32u24(dst, (char*)s32src, nframes, chcount * 4);
+            break;
+        }
+    }
+}
+
+static inline void CopyAndConvertOut(void *dst, jack_sample_t *src, size_t nframes, int channel, int chcount, int format)
+{
+    switch (format) {
+
+        case AFMT_S16_NE: {
+            signed short *s16dst = (signed short*)dst;
+            s16dst += channel;
+            sample_move_d16_sS((char*)s16dst, src, nframes, chcount * 2, NULL); // No dithering for now...
+            break;
+        }
+        case AFMT_S24_NE: {
+            char *s24dst = (char*)dst;
+            s24dst += channel * 3;
+            sample_move_d24_sS(s24dst, src, nframes, chcount * 3, NULL);
+            break;
+        }
+        case AFMT_S32_NE: {
+            signed int *s32dst = (signed int*)dst;
+            s32dst += channel;
+            sample_move_d32u24_sS((char*)s32dst, src, nframes, chcount * 4, NULL);
+            break;
+        }
     }
 }
 
@@ -139,6 +191,52 @@ bool JackOSSChannel::OpenPlayback(const char *device, bool exclusive, int bits, 
     fWriteChannel.set_target_latency(0);
 
     return true;
+}
+
+bool JackOSSChannel::Read(jack_sample_t **sample_buffers, jack_nframes_t length, std::int64_t end)
+{
+    if (fReadChannel.recording()) {
+        // Get buffer from read channel.
+        sosso::Buffer buffer = fReadChannel.take_buffer();
+
+        // Get recording audio data and then clear buffer.
+        for (unsigned i = 0; i < fReadChannel.channels(); i++) {
+            if (sample_buffers[i]) {
+                CopyAndConvertIn(sample_buffers[i], buffer.data(), length, i, fReadChannel.channels(), fReadChannel.sample_format());
+            }
+        }
+        buffer.reset();
+
+        // Put buffer back to capture at requested end position.
+        fReadChannel.set_buffer(std::move(buffer), end);
+        SignalWork();
+        return true;
+    }
+    return false;
+}
+
+bool JackOSSChannel::Write(jack_sample_t **sample_buffers, jack_nframes_t length, std::int64_t end)
+{
+    if (fWriteChannel.playback()) {
+        // Get buffer from write channel.
+        sosso::Buffer buffer = fWriteChannel.take_buffer();
+
+        // Clear buffer and write new playback audio data.
+        memset(buffer.data(), 0, buffer.length());
+        buffer.reset();
+        for (unsigned i = 0; i < fWriteChannel.channels(); i++) {
+            if (sample_buffers[i]) {
+                CopyAndConvertOut(buffer.data(), sample_buffers[i], length, i, fWriteChannel.channels(), fWriteChannel.sample_format());
+            }
+        }
+
+        // Put buffer back to playback at requested end position.
+        end += PlaybackCorrection();
+        fWriteChannel.set_buffer(std::move(buffer), end);
+        SignalWork();
+        return true;
+    }
+    return false;
 }
 
 bool JackOSSChannel::StartChannels(unsigned int buffer_frames)

@@ -93,6 +93,9 @@ class JackOSSChannel : public JackRunnableInterface
         bool OpenCapture(const char* device, bool exclusive, int bits, int &channels);
         bool OpenPlayback(const char* device, bool exclusive, int bits, int &channels);
 
+        bool Read(jack_sample_t** sample_buffers, jack_nframes_t length, std::int64_t end);
+        bool Write(jack_sample_t** sample_buffers, jack_nframes_t length, std::int64_t end);
+
         bool StartChannels(unsigned buffer_frames);
         bool StopChannels();
 
