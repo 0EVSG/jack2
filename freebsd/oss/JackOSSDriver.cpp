@@ -38,27 +38,6 @@ Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 
 using namespace std;
 
-namespace
-{
-
-int GetSampleFormat(int bits)
-{
-    switch(bits) {
-        // Native-endian signed 32 bit samples.
-        case 32:
-            return AFMT_S32_NE;
-        // Native-endian signed 24 bit (packed) samples.
-        case 24:
-            return AFMT_S24_NE;
-        // Native-endian signed 16 bit samples, used by default.
-        case 16:
-        default:
-            return AFMT_S16_NE;
-    }
-}
-
-}
-
 namespace Jack
 {
 
@@ -245,13 +224,13 @@ int JackOSSDriver::OpenAux()
     }
 
     if (fCapture) {
-        if (!fChannel.OpenCapture(fCaptureDriverName, fExcl, GetSampleFormat(fBits), fCaptureChannels)) {
+        if (!fChannel.OpenCapture(fCaptureDriverName, fExcl, fBits, fCaptureChannels)) {
             return -1;
         }
     }
 
     if (fPlayback) {
-        if (!fChannel.OpenPlayback(fPlaybackDriverName, fExcl, GetSampleFormat(fBits), fPlaybackChannels)) {
+        if (!fChannel.OpenPlayback(fPlaybackDriverName, fExcl, fBits, fPlaybackChannels)) {
             return -1;
         }
     }

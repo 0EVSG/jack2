@@ -90,8 +90,8 @@ class JackOSSChannel : public JackRunnableInterface
 
         bool InitialSetup(unsigned sample_rate);
 
-        bool OpenCapture(const char* device, bool exclusive, int sample_format, int &channels);
-        bool OpenPlayback(const char* device, bool exclusive, int sample_format, int &channels);
+        bool OpenCapture(const char* device, bool exclusive, int bits, int &channels);
+        bool OpenPlayback(const char* device, bool exclusive, int bits, int &channels);
 
         bool StartChannels(unsigned buffer_frames);
         bool StopChannels();

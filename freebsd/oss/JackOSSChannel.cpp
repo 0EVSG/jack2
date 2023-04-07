@@ -1,6 +1,5 @@
 /*
-Copyright (C) 2003-2007 Jussi Laako <jussi@sonarnerd.net>
-Copyright (C) 2008 Grame & RTL 2008
+Copyright (C) 2023 Florian Walpen <dev@submerge.ch>
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -18,15 +17,8 @@ Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 
 */
 
-#include "driver_interface.h"
-#include "JackThreadedDriver.h"
-#include "JackDriverLoader.h"
 #include "JackOSSChannel.h"
-#include "JackEngineControl.h"
-#include "JackGraphManager.h"
 #include "JackError.h"
-#include "JackTime.h"
-#include "JackShmMem.h"
 #include "memops.h"
 
 #include <cstdint>
@@ -37,7 +29,26 @@ Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 #include <assert.h>
 #include <stdio.h>
 
-using namespace std;
+namespace
+{
+
+int SuggestSampleFormat(int bits)
+{
+    switch(bits) {
+        // Native-endian signed 32 bit samples.
+        case 32:
+            return AFMT_S32_NE;
+        // Native-endian signed 24 bit (packed) samples.
+        case 24:
+            return AFMT_S24_NE;
+        // Native-endian signed 16 bit samples, used by default.
+        case 16:
+        default:
+            return AFMT_S16_NE;
+    }
+}
+
+}
 
 void sosso::Log::log(sosso::SourceLocation location, const char* message) {
     jack_log(message);
@@ -62,9 +73,11 @@ bool JackOSSChannel::InitialSetup(unsigned int sample_rate)
     return fFrameClock.set_sample_rate(sample_rate);
 }
 
-bool JackOSSChannel::OpenCapture(const char *device, bool exclusive, int sample_format, int &channels)
+bool JackOSSChannel::OpenCapture(const char *device, bool exclusive, int bits, int &channels)
 {
     if (channels == 0) channels = 2;
+
+    int sample_format = SuggestSampleFormat(bits);
 
     if (!fReadChannel.set_parameters(sample_format, fFrameClock.sample_rate(), channels)) {
         jack_error("JackOSSChannel::OpenCapture unsupported sample format %#x", sample_format);
@@ -94,9 +107,11 @@ bool JackOSSChannel::OpenCapture(const char *device, bool exclusive, int sample_
     return true;
 }
 
-bool JackOSSChannel::OpenPlayback(const char *device, bool exclusive, int sample_format, int &channels)
+bool JackOSSChannel::OpenPlayback(const char *device, bool exclusive, int bits, int &channels)
 {
     if (channels == 0) channels = 2;
+
+    int sample_format = SuggestSampleFormat(bits);
 
     if (!fWriteChannel.set_parameters(sample_format, fFrameClock.sample_rate(), channels)) {
         jack_error("JackOSSChannel::OpenPlayback unsupported sample format %#x", sample_format);
