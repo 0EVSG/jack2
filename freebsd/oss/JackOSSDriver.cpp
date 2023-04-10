@@ -26,6 +26,7 @@ Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 #include "JackError.h"
 #include "JackTime.h"
 
+#include <cstdint>
 #include <sys/ioctl.h>
 #include <sys/soundcard.h>
 #include <fcntl.h>
@@ -165,6 +166,8 @@ int JackOSSDriver::OpenAux()
 {
     // (Re-)Initialize runtime variables.
     fCycleEnd = 0;
+    fLastRun = 0;
+    fMaxRunGap = 0;
 
     if (!fChannel.InitialSetup(fEngineControl->fSampleRate)) {
         return -1;
@@ -233,8 +236,14 @@ int JackOSSDriver::Read()
     fCycleEnd += fEngineControl->fBufferSize;
 
     // Process read and write channels at least once.
+    std::int64_t channel_stamp = fChannel.FrameStamp();
     if (!fChannel.CheckTimeAndRun()) {
         return -1;
+    }
+    if (fChannel.FrameStamp() - fLastRun > fMaxRunGap) {
+        fMaxRunGap = fChannel.FrameStamp() - fLastRun;
+        std::int64_t channel_gap = fChannel.FrameStamp() - channel_stamp;
+        jack_info("JackOSSDriver::Read max run gap %lld frames vs channel %lld.", fMaxRunGap, channel_gap);
     }
 
     // Check for over- and underruns.
@@ -270,6 +279,7 @@ int JackOSSDriver::Read()
 
     if ((fChannel.FrameStamp() / fEngineControl->fBufferSize) % ((5 * fEngineControl->fSampleRate) / fEngineControl->fBufferSize) == 0) {
         fChannel.Capture().log_state(fChannel.FrameStamp());
+        fMaxRunGap = 0;
     }
 
 #ifdef JACK_MONITOR
@@ -294,6 +304,7 @@ int JackOSSDriver::Read()
     if (!(fChannel.CheckTimeAndRun() && fChannel.Unlock())) {
         return -1;
     }
+    fLastRun = fChannel.FrameStamp();
 
     return 0;
 }
@@ -309,8 +320,14 @@ int JackOSSDriver::Write()
     }
 
     // Process read and write channels at least once.
+    std::int64_t channel_stamp = fChannel.FrameStamp();
     if (!fChannel.CheckTimeAndRun()) {
         return -1;
+    }
+    if (fChannel.FrameStamp() - fLastRun > fMaxRunGap) {
+        fMaxRunGap = fChannel.FrameStamp() - fLastRun;
+        std::int64_t channel_gap = fChannel.FrameStamp() - channel_stamp;
+        jack_info("JackOSSDriver::Write max run gap %lld frames vs channel %lld.", fMaxRunGap, channel_gap);
     }
 
     // Wait and process channels until write buffer is finished.
@@ -322,6 +339,7 @@ int JackOSSDriver::Write()
 
     if ((fChannel.FrameStamp() / fEngineControl->fBufferSize) % ((5 * fEngineControl->fSampleRate) / fEngineControl->fBufferSize) == 0) {
         fChannel.Playback().log_state(fChannel.FrameStamp());
+        fMaxRunGap = 0;
     }
 
 #ifdef JACK_MONITOR
@@ -347,6 +365,7 @@ int JackOSSDriver::Write()
     if (!fChannel.CheckTimeAndRun()) {
         return -1;
     }
+    fLastRun = fChannel.FrameStamp();
 
 #ifdef JACK_MONITOR
     gCycleTable.fTable[gCycleCount].fAfterWrite = GetMicroSeconds();

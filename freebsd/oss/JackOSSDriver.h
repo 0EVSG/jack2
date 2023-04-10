@@ -58,6 +58,8 @@ class JackOSSDriver : public JackAudioDriver
         bool fIgnoreHW;
 
         std::int64_t fCycleEnd;
+        std::int64_t fLastRun;
+        std::int64_t fMaxRunGap;
         jack_sample_t** fSampleBuffers;
 
         JackOSSChannel fChannel;
@@ -75,7 +77,7 @@ class JackOSSDriver : public JackAudioDriver
                 : JackAudioDriver(name, alias, engine, table),
                 fBits(0),
                 fNperiods(0), fCapture(false), fPlayback(false), fExcl(false), fIgnoreHW(true),
-                fCycleEnd(0), fSampleBuffers(nullptr), fAssistThread(&fChannel)
+                fCycleEnd(0), fLastRun(0), fMaxRunGap(0), fSampleBuffers(nullptr), fAssistThread(&fChannel)
         {}
 
         virtual ~JackOSSDriver()
