@@ -209,7 +209,7 @@ bool JackOSSChannel::Read(jack_sample_t **sample_buffers, jack_nframes_t length,
 
         // Put buffer back to capture at requested end position.
         fReadChannel.set_buffer(std::move(buffer), end);
-        fNextWakeup = std::min(fReadChannel.wakeup_time(fFrameStamp), fWriteChannel.wakeup_time(fFrameStamp));
+        fNextWakeup = std::min(fReadChannel.wakeup_time(FrameStep()), fWriteChannel.wakeup_time(FrameStep()));
         SignalWork();
         return true;
     }
@@ -234,7 +234,7 @@ bool JackOSSChannel::Write(jack_sample_t **sample_buffers, jack_nframes_t length
         // Put buffer back to playback at requested end position.
         end += PlaybackCorrection();
         fWriteChannel.set_buffer(std::move(buffer), end);
-        fNextWakeup = std::min(fReadChannel.wakeup_time(fFrameStamp), fWriteChannel.wakeup_time(fFrameStamp));
+        fNextWakeup = std::min(fReadChannel.wakeup_time(FrameStep()), fWriteChannel.wakeup_time(FrameStep()));
         SignalWork();
         return true;
     }
@@ -314,14 +314,12 @@ bool JackOSSChannel::StopChannels()
 bool JackOSSChannel::CheckTimeAndRun()
 {
     // Check current frame time.
-    std::int64_t now = fFrameStamp;
-    if (!fFrameClock.now(now)) {
+    if (!fFrameClock.now(fFrameStamp)) {
         jack_error("JackOSSChannel::CheckTimeAndRun(): Frame clock failed.");
         return false;
     }
     // Round frame time down to steppings.
-    now = now - (now % fReadChannel.stepping());
-    fFrameStamp = now;
+    std::int64_t now = FrameStep();
 
     // Skip processing, we're supposed to sleep until next wakeup time.
     if (fFrameStamp < fNextWakeup) {
@@ -418,6 +416,11 @@ std::int64_t JackOSSChannel::XRunGap() const
         return fFrameStamp - max_end;
     }
     return 0;
+}
+
+std::int64_t JackOSSChannel::FrameStep() const
+{
+    return fFrameStamp - fFrameStamp % fFrameClock.stepping();
 }
 
 } // end of namespace

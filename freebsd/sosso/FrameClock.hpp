@@ -49,6 +49,8 @@ public:
     return false;
   }
 
+  unsigned stepping() const { return 16U * (1U + (_sample_rate / 50000)); }
+
 private:
   bool init_zero_time() { return gettime(_zero); }
 

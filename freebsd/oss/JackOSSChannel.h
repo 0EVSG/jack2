@@ -118,6 +118,8 @@ class JackOSSChannel : public JackRunnableInterface
         {
             return fFrameStamp;
         }
+
+        std::int64_t FrameStep() const;
 };
 
 } // end of namespace
