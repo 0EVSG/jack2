@@ -60,6 +60,8 @@ public:
   }
 
   bool process(std::int64_t now) {
+    // Round frame time down to steppings, ignore timing jitter.
+    now = now - now % Channel::stepping();
     bool ok = ready();
     // Process primary buffer while not done, or if there is no secondary.
     if (_buffer_a.buffer.remaining() > 0 || !_buffer_b.buffer.valid()) {
@@ -118,7 +120,7 @@ public:
     } else if (_buffer_b.buffer.valid()) {
       sync_frames = _buffer_b.end_frames + Channel::balance();
     }
-    return Channel::wakeup_time(now, sync_frames);
+    return Channel::wakeup_time(Channel::last_processing(), sync_frames);
   }
 
   std::int64_t buffer_progress() const {

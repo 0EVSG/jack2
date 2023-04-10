@@ -120,7 +120,6 @@ namespace Jack
 bool JackOSSChannel::InitialSetup(unsigned int sample_rate)
 {
     fFrameStamp = 0;
-    fNextWakeup = 0;
     fCorrection.clear();
     return fFrameClock.set_sample_rate(sample_rate);
 }
@@ -209,7 +208,6 @@ bool JackOSSChannel::Read(jack_sample_t **sample_buffers, jack_nframes_t length,
 
         // Put buffer back to capture at requested end position.
         fReadChannel.set_buffer(std::move(buffer), end);
-        fNextWakeup = std::min(fReadChannel.wakeup_time(FrameStep()), fWriteChannel.wakeup_time(FrameStep()));
         SignalWork();
         return true;
     }
@@ -234,7 +232,6 @@ bool JackOSSChannel::Write(jack_sample_t **sample_buffers, jack_nframes_t length
         // Put buffer back to playback at requested end position.
         end += PlaybackCorrection();
         fWriteChannel.set_buffer(std::move(buffer), end);
-        fNextWakeup = std::min(fReadChannel.wakeup_time(FrameStep()), fWriteChannel.wakeup_time(FrameStep()));
         SignalWork();
         return true;
     }
@@ -318,17 +315,11 @@ bool JackOSSChannel::CheckTimeAndRun()
         jack_error("JackOSSChannel::CheckTimeAndRun(): Frame clock failed.");
         return false;
     }
-    // Round frame time down to steppings.
-    std::int64_t now = FrameStep();
-
-    // Skip processing, we're supposed to sleep until next wakeup time.
-    if (fFrameStamp < fNextWakeup) {
-        return true;
-    }
+    std::int64_t now = fFrameStamp;
 
     // Process read channel if wakeup time passed, or OSS buffer data available.
     if (fReadChannel.recording() && !fReadChannel.total_finished(now)) {
-        if (now >= fReadChannel.wakeup_time(fReadChannel.last_processing())) {
+        if (now >= fReadChannel.wakeup_time(now)) {
             if (!fReadChannel.process(now)) {
                 jack_error("JackOSSChannel::CheckTimeAndRun(): Read process failed.");
                 return false;
@@ -337,7 +328,7 @@ bool JackOSSChannel::CheckTimeAndRun()
     }
     // Process write channel if wakeup time passed, or OSS buffer space available.
     if (fWriteChannel.playback() && !fWriteChannel.total_finished(now)) {
-        if (now >= fWriteChannel.wakeup_time(fWriteChannel.last_processing())) {
+        if (now >= fWriteChannel.wakeup_time(now)) {
             if (!fWriteChannel.process(now)) {
                 jack_error("JackOSSChannel::CheckTimeAndRun(): Write process failed.");
                 return false;
@@ -345,15 +336,14 @@ bool JackOSSChannel::CheckTimeAndRun()
         }
     }
 
-    fNextWakeup = std::min(fReadChannel.wakeup_time(now), fWriteChannel.wakeup_time(now));
-
     return true;
 }
 
 bool JackOSSChannel::Sleep() const
 {
-    if (fNextWakeup > fFrameStamp) {
-        return fFrameClock.sleep(fNextWakeup);
+    std::int64_t wakeup = NextWakeup();
+    if (wakeup > fFrameStamp) {
+        return fFrameClock.sleep(wakeup);
     }
     return true;
 }
@@ -397,11 +387,11 @@ bool JackOSSChannel::Execute()
             jack_info("JackOSSChannel::Execute resuming work.");
             return Unlock();
         }
-        if (fFrameStamp >= fNextWakeup) {
+        std::int64_t wakeup = NextWakeup();
+        if (fFrameStamp >= wakeup) {
             return Unlock();
         } else {
             // Unlock mutex before going to sleep, let others process.
-            std::int64_t wakeup = fNextWakeup;
             return Unlock() && fFrameClock.sleep(wakeup);
         }
     }
@@ -418,9 +408,9 @@ std::int64_t JackOSSChannel::XRunGap() const
     return 0;
 }
 
-std::int64_t JackOSSChannel::FrameStep() const
+std::int64_t JackOSSChannel::NextWakeup() const
 {
-    return fFrameStamp - fFrameStamp % fFrameClock.stepping();
+    return std::min(fReadChannel.wakeup_time(fFrameStamp), fWriteChannel.wakeup_time(fFrameStamp));
 }
 
 } // end of namespace

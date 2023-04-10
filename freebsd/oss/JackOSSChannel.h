@@ -49,7 +49,6 @@ class JackOSSChannel : public JackRunnableInterface
         sosso::Correction fCorrection;
 
         std::int64_t fFrameStamp = 0;
-        std::int64_t fNextWakeup = 0;
 
     public:
 
@@ -119,7 +118,7 @@ class JackOSSChannel : public JackRunnableInterface
             return fFrameStamp;
         }
 
-        std::int64_t FrameStep() const;
+        std::int64_t NextWakeup() const;
 };
 
 } // end of namespace
