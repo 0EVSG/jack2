@@ -63,7 +63,6 @@ class JackOSSDriver : public JackAudioDriver
         jack_sample_t** fSampleBuffers;
 
         JackOSSChannel fChannel;
-        JackThread fAssistThread;
 
         int OpenAux();
         void CloseAux();
@@ -77,7 +76,7 @@ class JackOSSDriver : public JackAudioDriver
                 : JackAudioDriver(name, alias, engine, table),
                 fBits(0),
                 fNperiods(0), fCapture(false), fPlayback(false), fExcl(false), fIgnoreHW(true),
-                fCycleEnd(0), fLastRun(0), fMaxRunGap(0), fSampleBuffers(nullptr), fAssistThread(&fChannel)
+                fCycleEnd(0), fLastRun(0), fMaxRunGap(0), fSampleBuffers(nullptr)
         {}
 
         virtual ~JackOSSDriver()

@@ -42,6 +42,7 @@ class JackOSSChannel : public JackRunnableInterface
 {
 
     private:
+        JackThread fAssistThread;
         JackProcessSync fMutex;
         sosso::FrameClock fFrameClock;
         sosso::DoubleBuffer<sosso::ReadChannel> fReadChannel;
@@ -52,7 +53,7 @@ class JackOSSChannel : public JackRunnableInterface
 
     public:
 
-        JackOSSChannel()
+        JackOSSChannel() : fAssistThread(this)
         {}
         virtual ~JackOSSChannel()
         {}
@@ -97,6 +98,9 @@ class JackOSSChannel : public JackRunnableInterface
 
         bool StartChannels(unsigned buffer_frames);
         bool StopChannels();
+
+        bool StartAssistThread(bool realtime, int priority);
+        bool StopAssistThread();
 
         bool CheckTimeAndRun();
 

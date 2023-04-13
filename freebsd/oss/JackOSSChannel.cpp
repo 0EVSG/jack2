@@ -308,6 +308,23 @@ bool JackOSSChannel::StopChannels()
     return true;
 }
 
+bool JackOSSChannel::StartAssistThread(bool realtime, int priority)
+{
+    if (fAssistThread.Start() >= 0) {
+        if (realtime && fAssistThread.AcquireRealTime(priority)) {
+            jack_error("JackOSSChannel::StartAssistThread realtime priority failed.");
+        }
+        return true;
+    }
+    return false;
+}
+
+bool JackOSSChannel::StopAssistThread()
+{
+    fAssistThread.Kill();
+    return true;
+}
+
 bool JackOSSChannel::CheckTimeAndRun()
 {
     // Check current frame time.

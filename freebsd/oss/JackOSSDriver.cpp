@@ -200,20 +200,15 @@ int JackOSSDriver::OpenAux()
         fSampleBuffers = new jack_sample_t * [max_channels];
     }
 
-    if (fAssistThread.Start() < 0) {
+    if (fChannel.StartAssistThread(fEngineControl->fRealTime, fEngineControl->fServerPriority)) {
         return -1;
-    }
-    if (fEngineControl->fRealTime) {
-        if (fAssistThread.AcquireRealTime(fEngineControl->fServerPriority) < 0) {
-            jack_error("JackOSSDriver::OpenAux assist thread realtime priority failed.");
-        }
     }
     return 0;
 }
 
 void JackOSSDriver::CloseAux()
 {
-    fAssistThread.Stop();
+    fChannel.StopAssistThread();
     fChannel.StopChannels();
 
     if (fSampleBuffers) {
