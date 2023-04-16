@@ -102,6 +102,7 @@ int JackOSSDriver::Open(jack_nframes_t nframes,
             Close();
             return -1;
         } else {
+            fChannel.StartAssistThread(fEngineControl->fRealTime, fEngineControl->fServerPriority);
             return 0;
         }
     }
@@ -156,6 +157,7 @@ int JackOSSDriver::Close()
         fclose(file);
     }
 #endif
+    fChannel.StopAssistThread();
     int res = JackAudioDriver::Close();
     CloseAux();
     return res;
@@ -164,6 +166,10 @@ int JackOSSDriver::Close()
 
 int JackOSSDriver::OpenAux()
 {
+    if (!fChannel.Lock()) {
+        return -1;
+    }
+
     // (Re-)Initialize runtime variables.
     fCycleEnd = 0;
     fLastRun = 0;
@@ -200,21 +206,25 @@ int JackOSSDriver::OpenAux()
         fSampleBuffers = new jack_sample_t * [max_channels];
     }
 
-    if (fChannel.StartAssistThread(fEngineControl->fRealTime, fEngineControl->fServerPriority)) {
+    if (!fChannel.Unlock()) {
         return -1;
     }
+
     return 0;
 }
 
 void JackOSSDriver::CloseAux()
 {
-    fChannel.StopAssistThread();
+    fChannel.Lock();
+
     fChannel.StopChannels();
 
     if (fSampleBuffers) {
         delete[] fSampleBuffers;
         fSampleBuffers = nullptr;
     }
+
+    fChannel.Unlock();
 }
 
 int JackOSSDriver::Read()
@@ -296,7 +306,7 @@ int JackOSSDriver::Read()
     gCycleTable.fTable[gCycleCount].fAfterReadConvert = GetMicroSeconds();
 #endif
 
-    if (!(fChannel.CheckTimeAndRun() && fChannel.Unlock())) {
+    if (!fChannel.CheckTimeAndRun() || !fChannel.Unlock()) {
         return -1;
     }
     fLastRun = fChannel.FrameStamp();

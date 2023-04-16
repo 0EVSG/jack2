@@ -286,6 +286,8 @@ bool JackOSSChannel::StartChannels(unsigned int buffer_frames)
     limit = limit / 2;
     fCorrection.set_drift_limits(-limit, limit);
 
+    SignalWork();
+
     return true;
 }
 
@@ -311,7 +313,7 @@ bool JackOSSChannel::StopChannels()
 bool JackOSSChannel::StartAssistThread(bool realtime, int priority)
 {
     if (fAssistThread.Start() >= 0) {
-        if (realtime && fAssistThread.AcquireRealTime(priority)) {
+        if (realtime && fAssistThread.AcquireRealTime(priority) != 0) {
             jack_error("JackOSSChannel::StartAssistThread realtime priority failed.");
         }
         return true;
@@ -321,7 +323,9 @@ bool JackOSSChannel::StartAssistThread(bool realtime, int priority)
 
 bool JackOSSChannel::StopAssistThread()
 {
-    fAssistThread.Kill();
+    if (fAssistThread.GetStatus() != JackThread::kIdle) {
+        fAssistThread.Kill();
+    }
     return true;
 }
 
