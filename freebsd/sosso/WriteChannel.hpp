@@ -18,7 +18,22 @@ public:
     if (exclusive) {
       mode |= O_EXCL;
     }
-    return Channel::open(device, mode);
+    if (Channel::open(device, mode)) {
+      _oss_available = buffer_frames();
+      return true;
+    }
+    return false;
+  }
+
+  std::int64_t oss_available() const { return _oss_available; }
+
+  bool needs_processing(const Buffer &buffer, std::int64_t end) const {
+    // Don't process if buffer is full and buffer end has been processed.
+    return buffer.remaining() > 0 || end + _target_latency > oss_position();
+  }
+
+  std::int64_t wakeup_time(std::int64_t sync_frames) const {
+    return Channel::wakeup_time(sync_frames, oss_available());
   }
 
   void set_target_latency(std::int64_t latency = 0) {
@@ -30,6 +45,7 @@ public:
   }
 
   bool process_mapped(Buffer &buffer, std::int64_t end, std::int64_t now) {
+    end += _target_latency;
     // Get OSS progress through map pointer.
     if (get_play_pointer()) {
       std::int64_t progress = map_progress() - _oss_progress;
@@ -53,16 +69,14 @@ public:
         Log::warn(SOSSO_LOC, "OSS playback buffer underrun, %lld lost.", loss);
       }
       available -= loss;
-      oss_progress(0, available);
-      if (!mark_progress(progress, now)) {
-        return false;
-      }
+      _oss_available = available;
+      mark_progress(progress, now);
     }
     // Treat the whole OSS buffer as available for writing.
     std::int64_t available = buffer_frames();
     // Calculate offset of write buffer position to available OSS window.
     std::int64_t offset = end - (buffer.remaining() / frame_size());
-    offset -= _last_progress - _target_latency;
+    offset -= last_progress();
     if (offset < 0) {
       // First part of the write buffer already passed, skip it.
       std::size_t skip = buffer.advance((-offset) * frame_size());
@@ -84,8 +98,8 @@ public:
           map_write(buffer.position(), pointer * frame_size(), remaining);
       buffer.advance(written);
       available -= (written / frame_size());
-      oss_progress(0, available);
-    } else if (freewheel() && now >= end + balance() + _target_latency) {
+      _oss_available = available;
+    } else if (freewheel() && now >= end + balance()) {
       // Buffer is overdue in freewheel sync mode, finish immediately.
       std::size_t skip = buffer.advance(buffer.remaining());
       Log::info(SOSSO_LOC, "@%lld - %lld Write buffer overdue, skip all %lu.",
@@ -98,15 +112,15 @@ public:
     if (map()) {
       return process_mapped(buffer, end, now);
     }
+    end += _target_latency;
     // Check for OSS buffer underruns.
-    std::int64_t overdue = now - estimated_dropout();
+    std::int64_t overdue = now - estimated_dropout(_oss_available);
     if ((overdue > 0 && get_play_underruns() > 0) || overdue > max_progress()) {
-      std::int64_t progress = oss_progress(0, buffer_frames());
+      std::int64_t progress = buffer_frames() - _oss_available;
+      _oss_available = buffer_frames();
       std::int64_t loss = mark_loss(progress, now);
       Log::warn(SOSSO_LOC, "OSS playback buffer underrun, %lld lost.", loss);
-      if (!mark_progress(progress + loss, now)) {
-        return false;
-      }
+      mark_progress(progress + loss, now);
     }
     std::size_t write_limit = buffer.remaining();
     std::int64_t offset = buffer_offset(buffer.remaining(), end);
@@ -140,10 +154,9 @@ public:
       available = buffer_frames() - queued_samples();
     }
     std::int64_t processed = bytes_written / frame_size();
-    std::int64_t progress = oss_progress(processed, available);
-    if (!mark_progress(progress, now)) {
-      return false;
-    }
+    std::int64_t progress = processed + available - _oss_available;
+    _oss_available = available;
+    mark_progress(progress, now);
     if (offset > 0) {
       // Rewind the remaining buffer gap fill up parts.
       std::int64_t rewind = buffer.rewind(offset * frame_size()) / frame_size();
@@ -151,18 +164,24 @@ public:
                 "@%lld - %lld Write buffer gap %lld, fill write %lld.", now,
                 end, offset, rewind);
     }
-    if (freewheel() && now >= end) {
+    if (freewheel() && now >= end + balance()) {
       buffer.advance(buffer.remaining());
     }
     return true;
   }
 
 private:
-  std::int64_t buffer_offset(std::size_t remaining, std::int64_t end) {
+  std::int64_t buffer_offset(std::size_t remaining, std::int64_t end) const {
     std::int64_t position = end - (remaining / frame_size());
-    std::int64_t processed = _last_progress + buffer_frames() - oss_available();
-    std::int64_t offset = position + _target_latency - processed;
-    return offset;
+    return position - oss_position();
+  }
+
+  std::int64_t buffer_position(std::size_t remaining, std::int64_t end) const {
+    return end - (remaining / frame_size());
+  }
+
+  std::int64_t oss_position() const {
+    return last_progress() + buffer_frames() - oss_available();
   }
 
   bool non_blocking_write(char *buffer, std::size_t limit,
@@ -212,6 +231,7 @@ private:
 
   std::int64_t _target_latency = 0;
   std::int64_t _oss_progress = 0;
+  std::int64_t _oss_available = 0;
 };
 
 } // namespace sosso

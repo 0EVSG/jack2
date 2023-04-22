@@ -64,11 +64,12 @@ public:
     now = now - now % Channel::stepping();
     bool ok = ready();
     // Process primary buffer while not done, or if there is no secondary.
-    if (_buffer_a.buffer.remaining() > 0 || !_buffer_b.buffer.valid()) {
+    if (Channel::needs_processing(_buffer_a.buffer, _buffer_a.end_frames)) {
       ok = ok && Channel::process(_buffer_a.buffer, _buffer_a.end_frames, now);
     }
     // Process secondary buffer if primary is done.
-    if (_buffer_a.buffer.remaining() == 0 && _buffer_b.buffer.valid()) {
+    if (!Channel::needs_processing(_buffer_a.buffer, _buffer_a.end_frames) &&
+        Channel::needs_processing(_buffer_b.buffer, _buffer_b.end_frames)) {
       ok = ok && Channel::process(_buffer_b.buffer, _buffer_b.end_frames, now);
     }
     return ok;
@@ -120,7 +121,7 @@ public:
     } else if (_buffer_b.buffer.valid()) {
       sync_frames = _buffer_b.end_frames + Channel::balance();
     }
-    return Channel::wakeup_time(Channel::last_processing(), sync_frames);
+    return Channel::wakeup_time(sync_frames);
   }
 
   std::int64_t buffer_progress() const {

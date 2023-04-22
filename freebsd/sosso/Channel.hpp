@@ -16,21 +16,18 @@ public:
     _balance = 0;
     _min_progress = 0;
     _max_progress = 0;
-    _oss_available = 0;
     _total_loss = 0;
     _sync_level = 8;
-    bool ok = Device::open(device, mode);
-    if (playback()) {
-      _oss_available = buffer_frames();
-    }
-    return ok;
+    return Device::open(device, mode);
   }
+
+  std::int64_t last_progress() const { return _last_progress; }
+
+  std::int64_t balance() const { return _balance; }
 
   std::int64_t last_sync() const { return _last_sync; }
 
   std::int64_t last_processing() const { return _last_processing; }
-
-  std::int64_t balance() const { return _balance; }
 
   std::int64_t next_min_progress() const {
     return _last_progress + _min_progress + _balance;
@@ -48,29 +45,28 @@ public:
 
   bool resync() const { return _sync_level > 0; }
 
-  std::int64_t oss_available() const { return _oss_available; }
-
   std::int64_t total_loss() const { return _total_loss; }
 
-  std::int64_t safe_wakeup() const {
-    return next_min_progress() + buffer_frames() - _oss_available -
+  std::int64_t safe_wakeup(std::int64_t oss_available) const {
+    return next_min_progress() + buffer_frames() - oss_available -
            max_progress();
   }
 
-  std::int64_t estimated_dropout() const {
-    return _last_progress + _balance + buffer_frames() - _oss_available;
+  std::int64_t estimated_dropout(std::int64_t oss_available) const {
+    return _last_progress + _balance + buffer_frames() - oss_available;
   }
 
-  std::int64_t wakeup_time(std::int64_t now, std::int64_t sync_target) const {
+  std::int64_t wakeup_time(std::int64_t sync_target,
+                           std::int64_t oss_available) const {
     // Use one sync step by default.
-    std::int64_t wakeup = now + Device::stepping();
+    std::int64_t wakeup = _last_processing + Device::stepping();
     if (freewheel() || full_resync()) {
       // Small steps when doing a full resync.
     } else if (resync() || wakeup + max_progress() > sync_target) {
       // Sync required, wake up prior to next progress if possible.
       if (next_min_progress() > wakeup) {
         wakeup = next_min_progress() - Device::stepping();
-      } else if (next_min_progress() > now) {
+      } else if (next_min_progress() > _last_processing) {
         wakeup = next_min_progress();
       }
     } else {
@@ -78,26 +74,20 @@ public:
       wakeup = sync_target - max_progress();
     }
     // Make sure we wake up at sync target.
-    if (sync_target > now && sync_target < wakeup) {
+    if (sync_target > _last_processing && sync_target < wakeup) {
       wakeup = sync_target;
     }
     // Make sure we don't sleep into an OSS under- or overrun.
-    if (now < safe_wakeup() && safe_wakeup() < wakeup) {
-      wakeup = std::max(safe_wakeup(), now + Device::stepping());
+    if (_last_processing < safe_wakeup(oss_available) &&
+        safe_wakeup(oss_available) < wakeup) {
+      wakeup = std::max(safe_wakeup(oss_available),
+                        _last_processing + Device::stepping());
     }
     return wakeup;
   }
 
 protected:
-  std::int64_t oss_progress(std::int64_t processed,
-                            std::int64_t oss_available) {
-    // Compute OSS progress from read / write and buffer content.
-    std::int64_t progress = processed + oss_available - _oss_available;
-    _oss_available = oss_available;
-    return progress;
-  }
-
-  bool mark_progress(std::int64_t progress, std::int64_t now) {
+  void mark_progress(std::int64_t progress, std::int64_t now) {
     if (progress > 0) {
       if (freewheel()) {
         // Some cards show irregular progress at the beginning, correct that.
@@ -127,7 +117,6 @@ protected:
       _last_progress += progress;
     }
     _last_processing = now;
-    return true;
   }
 
   std::int64_t mark_loss(std::int64_t progress, std::int64_t now) {
@@ -153,7 +142,6 @@ protected:
   std::int64_t _balance = 0;
   std::int64_t _min_progress = 0;
   std::int64_t _max_progress = 0;
-  std::int64_t _oss_available = 0;
   std::int64_t _total_loss = 0;
   unsigned _sync_level = 0;
 };
