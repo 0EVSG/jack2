@@ -63,14 +63,19 @@ public:
     // Round frame time down to steppings, ignore timing jitter.
     now = now - now % Channel::stepping();
     bool ok = ready();
-    // Process primary buffer while not done, or if there is no secondary.
-    if (Channel::needs_processing(_buffer_a.buffer, _buffer_a.end_frames)) {
-      ok = ok && Channel::process(_buffer_a.buffer, _buffer_a.end_frames, now);
+    // Process primary buffer while not done.
+    if (ok && Channel::pro_position() < _buffer_a.end_frames) {
+      ok = Channel::process(_buffer_a.buffer, _buffer_a.end_frames, now);
+      if (_buffer_b.buffer.rewind(_buffer_b.buffer.progress()) > 0) {
+        Log::warn(SOSSO_LOC, "Processing primary buffer, rewind secondary.");
+      }
     }
-    // Process secondary buffer if primary is done.
-    if (!Channel::needs_processing(_buffer_a.buffer, _buffer_a.end_frames) &&
-        Channel::needs_processing(_buffer_b.buffer, _buffer_b.end_frames)) {
-      ok = ok && Channel::process(_buffer_b.buffer, _buffer_b.end_frames, now);
+    // Process secondary buffer when primary is done.
+    if (ok && Channel::pro_position() >= _buffer_a.end_frames) {
+      if (_buffer_a.buffer.advance(_buffer_a.buffer.remaining()) > 0) {
+        Log::warn(SOSSO_LOC, "Processing secondary buffer, skip primary.");
+      }
+      ok = Channel::process(_buffer_b.buffer, _buffer_b.end_frames, now);
     }
     return ok;
   }
@@ -116,10 +121,12 @@ public:
     }
     // Get upcoming buffer end and compute next channel wakeup time.
     std::int64_t sync_frames = now;
-    if (!finished(now)) {
+    if (_buffer_a.buffer.valid() && !finished(now)) {
       sync_frames = period_end();
-    } else if (_buffer_b.buffer.valid()) {
+    } else if (_buffer_b.buffer.valid() && !total_finished(now)) {
       sync_frames = _buffer_b.end_frames + Channel::balance();
+    } else {
+      sync_frames = std::numeric_limits<std::int64_t>::max();
     }
     return Channel::wakeup_time(sync_frames);
   }

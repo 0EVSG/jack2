@@ -78,8 +78,7 @@ public:
       wakeup = sync_target;
     }
     // Make sure we don't sleep into an OSS under- or overrun.
-    if (_last_processing < safe_wakeup(oss_available) &&
-        safe_wakeup(oss_available) < wakeup) {
+    if (safe_wakeup(oss_available) < wakeup) {
       wakeup = std::max(safe_wakeup(oss_available),
                         _last_processing + Device::stepping());
     }

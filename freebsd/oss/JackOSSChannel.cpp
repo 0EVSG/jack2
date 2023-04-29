@@ -153,7 +153,6 @@ bool JackOSSChannel::OpenCapture(const char *device, bool exclusive, int bits, i
     }
 
     fReadChannel.memory_map();
-    fReadChannel.set_target_latency(0);
 
     return true;
 }
@@ -187,7 +186,6 @@ bool JackOSSChannel::OpenPlayback(const char *device, bool exclusive, int bits, 
     }
 
     fWriteChannel.memory_map();
-    fWriteChannel.set_target_latency(0);
 
     return true;
 }

@@ -4,6 +4,7 @@
 #include "sosso/Buffer.hpp"
 #include "sosso/Channel.hpp"
 #include "sosso/Logging.hpp"
+#include <algorithm>
 #include <fcntl.h>
 #include <unistd.h>
 
@@ -16,15 +17,17 @@ public:
     if (exclusive) {
       mode |= O_EXCL;
     }
-    _oss_available = 0;
     return Channel::open(device, mode);
   }
 
-  std::int64_t oss_available() const { return _oss_available; }
-
-  bool needs_processing(const Buffer &buffer, std::int64_t end) const {
-    return buffer.remaining() > 0 || end - _target_latency > oss_position();
+  std::int64_t oss_available() const {
+    std::int64_t result = last_progress() - _read_position;
+    result = std::max<std::int64_t>(result, 0);
+    result = std::min<std::int64_t>(result, buffer_frames());
+    return result;
   }
+
+  std::int64_t pro_position() const { return oss_position() + _target_latency; }
 
   std::int64_t wakeup_time(std::int64_t sync_frames) const {
     return Channel::wakeup_time(sync_frames, oss_available());
@@ -39,85 +42,82 @@ public:
     }
   }
 
+  bool process(Buffer &buffer, std::int64_t end, std::int64_t now) {
+    if (map()) {
+      return process_mapped(buffer, end, now);
+    } else {
+      return process_read(buffer, end, now);
+    }
+  }
+
   bool process_mapped(Buffer &buffer, std::int64_t end, std::int64_t now) {
     end -= _target_latency;
     // Get OSS progress through map pointer.
     if (get_rec_pointer()) {
       std::int64_t progress = map_progress() - _oss_progress;
       _oss_progress += progress;
-      std::int64_t available = progress + oss_available();
+      std::int64_t available = last_progress() + progress - _read_position;
       std::int64_t loss = mark_loss(available - buffer_frames());
       if (loss > 0) {
         Log::warn(SOSSO_LOC, "OSS recording buffer overrun, %lld lost.", loss);
+        _read_position = last_progress() - buffer_frames();
       }
-      available -= loss;
-      _oss_available = available;
       mark_progress(progress, now);
       set_target_latency();
     }
     // Only read what is available until OSS captured its complete buffer.
-    std::int64_t available = buffer_frames();
-    if (_oss_progress < available) {
-      available = _oss_progress;
+    std::int64_t oldest = last_progress() - buffer_frames();
+    if (_oss_progress < buffer_frames()) {
+      oldest = last_progress() - _oss_progress;
     }
     // Calculate offset of read buffer position to available OSS data.
-    std::int64_t offset = end - (buffer.remaining() / frame_size());
-    offset -= (last_progress() - available);
-    if (offset < 0) {
+    std::int64_t position = buffer_position(buffer.remaining(), end);
+    if (position < oldest) {
       // First part of the read buffer already passed, fill it up.
-      std::size_t fill = buffer.remaining((-offset) * frame_size());
+      std::size_t fill = buffer.remaining((oldest - position) * frame_size());
       std::memset(buffer.position(), 0, fill);
       buffer.advance(fill);
       Log::info(SOSSO_LOC,
                 "@%lld - %lld Read buffer overlap %lld, fill by %lu.", now, end,
-                offset, fill / frame_size());
-      offset += fill / frame_size();
+                oldest - position, fill / frame_size());
+      position += fill / frame_size();
     }
-    if (offset >= 0 && offset < available && buffer.remaining() > 0) {
+    if (position >= oldest && position < last_progress() &&
+        buffer.remaining() > 0) {
       // Read from offset up to current position, if read buffer can hold it.
-      available -= offset;
-      std::size_t remaining = buffer.remaining(available * frame_size());
-      unsigned pointer = (_oss_progress - available) % buffer_frames();
-      remaining =
-          map_read(buffer.position(), pointer * frame_size(), remaining);
-      buffer.advance(remaining);
-      available -= (remaining / frame_size());
-      _oss_available = available;
-    } else if (freewheel() && now >= end + balance()) {
-      // Buffer is overdue in freewheel sync mode, finish immediately.
-      std::size_t fill = buffer.remaining();
-      std::memset(buffer.position(), 0, fill);
-      buffer.advance(fill);
-      Log::info(SOSSO_LOC, "@%lld - %lld Read buffer overdue, fill by %lu.",
-                now, end, fill / frame_size());
+      std::int64_t offset = last_progress() - position;
+      std::size_t length = buffer.remaining(offset * frame_size());
+      unsigned pointer = (_oss_progress - offset) % buffer_frames();
+      length = map_read(buffer.position(), pointer * frame_size(), length);
+      buffer.advance(length);
     }
+    freewheel_finish(buffer, end, now);
+    _read_position = buffer_position(buffer.remaining(), end);
     return true;
   }
 
-  bool process(Buffer &buffer, std::int64_t end, std::int64_t now) {
-    if (map()) {
-      return process_mapped(buffer, end, now);
-    }
+  bool process_read(Buffer &buffer, std::int64_t end, std::int64_t now) {
     end -= _target_latency;
     // Check for OSS buffer overruns.
-    std::int64_t overdue = now - estimated_dropout(_oss_available);
+    std::int64_t overdue = now - estimated_dropout(oss_available());
     if ((overdue > 0 && get_rec_overruns() > 0) || overdue > max_progress()) {
-      std::int64_t progress = buffer_frames() - _oss_available;
-      _oss_available = buffer_frames();
+      std::int64_t progress = buffer_frames() - oss_available();
       std::int64_t loss = mark_loss(progress, now);
       Log::warn(SOSSO_LOC, "OSS recording buffer overrun, %lld lost.", loss);
       mark_progress(progress + loss, now);
+      _read_position = last_progress() - buffer_frames();
     }
-    std::int64_t offset = buffer_offset(buffer.remaining(), end);
-    if (offset < 0) {
+    std::int64_t position = buffer_position(buffer.remaining(), end);
+    if (position < _read_position) {
       // Overlapping buffers, skip the overlapping part.
-      char *position = buffer.position();
-      std::size_t advance = buffer.advance((-offset) * frame_size());
-      std::memset(position, 0, advance);
+      char *data = buffer.position();
+      std::size_t skip = (_read_position - position) * frame_size();
+      skip = buffer.advance(skip);
+      std::memset(data, 0, skip);
       Log::info(SOSSO_LOC,
                 "@%lld - %lld Read buffer overlap %lld, advance by %lu.", now,
-                end, offset, advance / frame_size());
-      offset += advance / frame_size();
+                end, _read_position - position, skip / frame_size());
+      position += skip / frame_size();
     }
     // Read as much as currently available and fits into the buffer.
     std::size_t bytes_read = 0;
@@ -126,35 +126,39 @@ public:
     }
     buffer.advance(bytes_read);
     // Assume all OSS data was read if buffer is not full yet.
-    std::int64_t available = 0;
+    std::int64_t queued = 0;
     if (buffer.remaining() == 0) {
       // Buffer size was the limit, query queued OSS buffer content.
-      available = queued_samples();
+      queued = queued_samples();
     }
-    std::int64_t processed = bytes_read / frame_size();
-    std::int64_t progress = processed + available - _oss_available;
-    _oss_available = available;
+    std::int64_t progress = queued - (last_progress() - _read_position);
+    progress += bytes_read / frame_size();
     mark_progress(progress, now);
-    if (offset > 0) {
+    _read_position = last_progress() - queued;
+    position = buffer_position(buffer.remaining(), end);
+    if (position > _read_position) {
       // Gap between buffers, erase early frames not mapped to buffer.
-      std::size_t erased = buffer.erase(0, offset * frame_size());
+      std::size_t erase = (position - _read_position) * frame_size();
+      erase = buffer.erase(0, erase);
       Log::info(SOSSO_LOC, "@%lld - %lld Read buffer gap %lld, erased %lu.",
-                now, end, offset, erased / frame_size());
-      offset -= erased / frame_size();
+                now, end, position - _read_position, erase / frame_size());
     }
     set_target_latency();
+    freewheel_finish(buffer, end, now);
     return true;
   }
 
 private:
+  std::int64_t buffer_position(std::size_t remaining, std::int64_t end) const {
+    return end - (remaining / frame_size());
+  }
+
   std::int64_t buffer_offset(std::size_t remaining, std::int64_t end) const {
     std::int64_t position = end - (remaining / frame_size());
     return position - oss_position();
   }
 
-  std::int64_t oss_position() const {
-    return last_progress() - oss_available();
-  }
+  std::int64_t oss_position() const { return _read_position; }
 
   bool non_blocking_read(char *buffer, std::size_t limit,
                          std::size_t &progress) {
@@ -194,9 +198,20 @@ private:
     return bytes_read;
   }
 
+  void freewheel_finish(Buffer &buffer, std::int64_t end, std::int64_t now) {
+    if (freewheel() && now >= end + balance()) {
+      // Buffer is overdue in freewheel sync mode, finish immediately.
+      std::size_t fill = buffer.remaining();
+      std::memset(buffer.position(), 0, fill);
+      buffer.advance(fill);
+      Log::info(SOSSO_LOC, "@%lld - %lld Read buffer overdue, fill by %lu.",
+                now, end, fill / frame_size());
+    }
+  }
+
   std::int64_t _target_latency = 0;
   std::int64_t _oss_progress = 0;
-  std::int64_t _oss_available = 0;
+  std::int64_t _read_position = 0;
 };
 
 } // namespace sosso
