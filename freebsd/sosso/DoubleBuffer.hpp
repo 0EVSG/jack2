@@ -62,19 +62,10 @@ public:
   bool process(std::int64_t now) {
     // Round frame time down to steppings, ignore timing jitter.
     now = now - now % Channel::stepping();
-    bool ok = ready();
-    // Process primary buffer while not done.
-    if (ok && Channel::pro_position() < _buffer_a.end_frames) {
-      ok = Channel::process(_buffer_a.buffer, _buffer_a.end_frames, now);
-      if (_buffer_b.buffer.rewind(_buffer_b.buffer.progress()) > 0) {
-        Log::warn(SOSSO_LOC, "Processing primary buffer, rewind secondary.");
-      }
-    }
+    // Always process primary buffer, No-Op if already done.
+    bool ok = Channel::process(_buffer_a.buffer, _buffer_a.end_frames, now);
     // Process secondary buffer when primary is done.
-    if (ok && Channel::pro_position() >= _buffer_a.end_frames) {
-      if (_buffer_a.buffer.advance(_buffer_a.buffer.remaining()) > 0) {
-        Log::warn(SOSSO_LOC, "Processing secondary buffer, skip primary.");
-      }
+    if (ok && _buffer_a.buffer.remaining() == 0 && _buffer_b.buffer.valid()) {
       ok = Channel::process(_buffer_b.buffer, _buffer_b.end_frames, now);
     }
     return ok;

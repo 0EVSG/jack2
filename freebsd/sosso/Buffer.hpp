@@ -42,6 +42,8 @@ public:
 
   std::size_t remaining() const { return _length - _position; }
 
+  bool done() const { return _position == _length; }
+
   std::size_t remaining(std::size_t progress) const {
     if (progress > remaining()) {
       progress = remaining();
