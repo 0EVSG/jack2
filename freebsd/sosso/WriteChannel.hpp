@@ -1,18 +1,45 @@
+/*
+ * Copyright (c) 2023 Florian Walpen <dev@submerge.ch>
+ *
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ */
+
 #ifndef SOSSO_WRITECHANNEL_HPP
 #define SOSSO_WRITECHANNEL_HPP
 
 #include "sosso/Buffer.hpp"
 #include "sosso/Channel.hpp"
 #include "sosso/Logging.hpp"
-#include <cstring>
 #include <fcntl.h>
-#include <unistd.h>
-#include <vector>
 
 namespace sosso {
 
+/*!
+ * \brief Playback Channel
+ *
+ * Specializes the generic Channel class into a playback channel. It keeps track
+ * of the OSS playback progress, and writes audio data from an external buffer
+ * to the available OSS buffer. If the OSS buffer is memory mapped, the audio
+ * data is copied there. Otherwise I/O write() system calls are used.
+ */
 class WriteChannel : public Channel {
 public:
+  /*!
+   * \brief Open a device for playback.
+   * \param device Path to the device, e.g. "/dev/dsp1".
+   * \param exclusive Try to get exclusive access to the device.
+   * \return True if the device was opened successfully.
+   */
   bool open(const char *device, bool exclusive = true) {
     int mode = O_WRONLY | O_NONBLOCK;
     if (exclusive) {
@@ -21,19 +48,33 @@ public:
     return Channel::open(device, mode);
   }
 
+  //! Available OSS buffer space for writing, in frames.
   std::int64_t oss_available() const {
     std::int64_t result = last_progress() + buffer_frames() - _write_position;
-    result = std::max<std::int64_t>(result, 0);
-    result = std::min<std::int64_t>(result, buffer_frames());
+    if (result < 0) {
+      result = 0;
+    } else if (result > buffer_frames()) {
+      result = buffer_frames();
+    }
     return result;
   }
 
-  std::int64_t pro_position() const { return _write_position; }
-
+  /*!
+   * \brief Calculate next wakeup time.
+   * \param sync_frames Required sync event (e.g. buffer end), in frame time.
+   * \return Suggested and safe wakeup time for next process(), in frame time.
+   */
   std::int64_t wakeup_time(std::int64_t sync_frames) const {
     return Channel::wakeup_time(sync_frames, oss_available());
   }
 
+  /*!
+   * \brief Check OSS progress and write playback audio to the OSS buffer.
+   * \param buffer Buffer of playback audio data, untouched if invalid.
+   * \param end Buffer end position, matching channel progress.
+   * \param now Current time in frame time, see FrameClock.
+   * \return True if successful, false means there was an error.
+   */
   bool process(Buffer &buffer, std::int64_t end, std::int64_t now) {
     if (map()) {
       return (progress_done(now) || check_map_progress(now)) &&
@@ -45,8 +86,10 @@ public:
   }
 
 protected:
+  // Indicate that OSS progress has already been checked.
   bool progress_done(std::int64_t now) { return (last_processing() == now); }
 
+  // Check OSS progress in case of memory mapped buffer.
   bool check_map_progress(std::int64_t now) {
     // Get OSS progress through map pointer.
     if (get_play_pointer()) {
@@ -61,7 +104,7 @@ protected:
           progress = progress % buffer_frames();
         }
         // Clear obsolete audio data in the buffer.
-        map_write(nullptr, (_oss_progress % buffer_frames()) * frame_size(),
+        write_map(nullptr, (_oss_progress % buffer_frames()) * frame_size(),
                   progress * frame_size());
         _oss_progress = map_progress();
       }
@@ -76,6 +119,7 @@ protected:
     return progress_done(now);
   }
 
+  // Write playback audio data to a memory mapped OSS buffer.
   bool process_mapped(Buffer &buffer, std::int64_t end, std::int64_t now) {
     // Buffer position should be between OSS progress and last write position.
     std::int64_t position = buffer_position(buffer.remaining(), end);
@@ -96,7 +140,7 @@ protected:
       }
     }
     // The writable window is the whole buffer, starting from OSS progress.
-    if (buffer.remaining() > 0 && position >= last_progress() &&
+    if (!buffer.done() && position >= last_progress() &&
         position < last_progress() + buffer_frames()) {
       if (_write_position < position && _write_position + 8 >= position) {
         // Small remaining gap between writes, fill in a replay patch.
@@ -105,7 +149,7 @@ protected:
         std::size_t length = (position - _write_position) * frame_size();
         length = buffer.remaining(length);
         std::size_t written =
-            map_write(buffer.position(), pointer * frame_size(), length);
+            write_map(buffer.position(), pointer * frame_size(), length);
         Log::info(SOSSO_LOC, "@%lld - %lld Write small gap %lld, replay %lld.",
                   now, end, position - _write_position, written / frame_size());
       }
@@ -115,7 +159,7 @@ protected:
       std::size_t length = (buffer_frames() - offset) * frame_size();
       length = buffer.remaining(length);
       std::size_t written =
-          map_write(buffer.position(), pointer * frame_size(), length);
+          write_map(buffer.position(), pointer * frame_size(), length);
       buffer.advance(written);
       _write_position = buffer_position(buffer.remaining(), end);
     }
@@ -123,6 +167,7 @@ protected:
     return true;
   }
 
+  // Check progress when using I/O write() system call.
   bool check_write_progress(std::int64_t now) {
     // Check for OSS buffer underruns.
     std::int64_t overdue = now - estimated_dropout(oss_available());
@@ -143,6 +188,7 @@ protected:
     return progress_done(now);
   }
 
+  // Write playback audio data to OSS buffer using I/O write() system call.
   bool process_write(Buffer &buffer, std::int64_t end, std::int64_t now) {
     bool ok = true;
     // Adjust buffer position to OSS write position, if possible.
@@ -167,7 +213,7 @@ protected:
       std::int64_t gap = position - _write_position;
       std::size_t write_limit = buffer.remaining(gap * frame_size());
       std::size_t bytes_written = 0;
-      ok = non_blocking_write(buffer.position(), write_limit, bytes_written);
+      ok = write_io(buffer.position(), write_limit, bytes_written);
       Log::info(SOSSO_LOC, "@%lld - %lld Write buffer gap %lld, fill %lld.",
                 now, end, gap, bytes_written / frame_size());
       _write_position += bytes_written / frame_size();
@@ -175,7 +221,7 @@ protected:
       // Write as much as currently possible.
       std::size_t write_limit = buffer.remaining();
       std::size_t bytes_written = 0;
-      ok = non_blocking_write(buffer.position(), write_limit, bytes_written);
+      ok = write_io(buffer.position(), write_limit, bytes_written);
       _write_position += bytes_written / frame_size();
       buffer.advance(bytes_written);
     }
@@ -185,59 +231,17 @@ protected:
   }
 
 private:
+  // Calculate write position of the remaining buffer.
   std::int64_t buffer_position(std::size_t remaining, std::int64_t end) const {
     return end - (remaining / frame_size());
   }
 
+  // Indicate that a buffer doesn't need further processing.
   bool buffer_done(const Buffer &buffer, std::int64_t end) const {
-    return buffer.remaining() == 0 && end <= _write_position;
+    return buffer.done() && end <= _write_position;
   }
 
-  bool non_blocking_write(char *buffer, std::size_t limit,
-                          std::size_t &progress) {
-    if (buffer && limit > 0) {
-      ssize_t result = ::write(file_descriptor(), buffer, limit);
-      if (result >= 0) {
-        progress += result;
-      } else if (errno == EAGAIN) {
-        progress += 0;
-      } else {
-        Log::warn(SOSSO_LOC, "Data write failed with %d.", errno);
-        return false;
-      }
-    }
-    return true;
-  }
-
-  std::size_t map_write(const char *source, std::size_t pointer,
-                        std::size_t length) {
-    std::size_t bytes_written = 0;
-    if (length > 0) {
-      // Sanitize pointer and length parameters.
-      pointer = pointer % buffer_size();
-      if (length > buffer_size()) {
-        length = buffer_size();
-      }
-      if (pointer + length > buffer_size()) {
-        // Write across buffer cycle boundary, write until buffer end first.
-        bytes_written += map_write(source, pointer, buffer_size() - pointer);
-        length -= bytes_written;
-        if (source) {
-          source += bytes_written;
-        }
-        pointer = 0;
-      }
-      // Write source if available, otherwise clear the buffer.
-      if (source) {
-        std::memcpy(map() + pointer, source, length);
-      } else {
-        std::memset(map() + pointer, 0, length);
-      }
-      bytes_written += length;
-    }
-    return bytes_written;
-  }
-
+  // Avoid stalled buffers with irregular OSS progress in freewheel mode.
   std::int64_t freewheel_finish(Buffer &buffer, std::int64_t end,
                                 std::int64_t now) {
     std::int64_t advance = 0;
@@ -251,6 +255,7 @@ private:
     return advance;
   }
 
+  // Skip writing part of the buffer to match OSS write position.
   std::int64_t buffer_advance(Buffer &buffer, std::int64_t frames) {
     if (frames > 0) {
       return buffer.advance(frames * frame_size()) / frame_size();
@@ -258,6 +263,7 @@ private:
     return 0;
   }
 
+  // Rewind part of the buffer to match OSS write postion.
   std::int64_t buffer_rewind(Buffer &buffer, std::int64_t frames) {
     if (frames > 0) {
       return buffer.rewind(frames * frame_size()) / frame_size();
@@ -265,8 +271,8 @@ private:
     return 0;
   }
 
-  std::int64_t _oss_progress = 0;
-  std::int64_t _write_position = 0;
+  std::int64_t _oss_progress = 0;   // Last memory mapped OSS progress.
+  std::int64_t _write_position = 0; // Current write position of the channel.
 };
 
 } // namespace sosso

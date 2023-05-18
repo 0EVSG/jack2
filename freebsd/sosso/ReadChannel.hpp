@@ -1,17 +1,45 @@
+/*
+ * Copyright (c) 2023 Florian Walpen <dev@submerge.ch>
+ *
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ */
+
 #ifndef SOSSO_READCHANNEL_HPP
 #define SOSSO_READCHANNEL_HPP
 
 #include "sosso/Buffer.hpp"
 #include "sosso/Channel.hpp"
 #include "sosso/Logging.hpp"
-#include <algorithm>
 #include <fcntl.h>
-#include <unistd.h>
 
 namespace sosso {
 
+/*!
+ * \brief Recording Channel
+ *
+ * Specializes the generic Channel class into a recording channel. It keeps
+ * track of the OSS recording progress, and reads the available audio data to an
+ * external buffer. If the OSS buffer is memory mapped, the audio data is copied
+ * from there. Otherwise I/O read() system calls are used.
+ */
 class ReadChannel : public Channel {
 public:
+  /*!
+   * \brief Open a device for recording.
+   * \param device Path to the device, e.g. "/dev/dsp1".
+   * \param exclusive Try to get exclusive access to the device.
+   * \return True if the device was opened successfully.
+   */
   bool open(const char *device, bool exclusive = true) {
     int mode = O_RDONLY | O_NONBLOCK;
     if (exclusive) {
@@ -20,19 +48,33 @@ public:
     return Channel::open(device, mode);
   }
 
+  //! Available audio data to be read, in frames.
   std::int64_t oss_available() const {
     std::int64_t result = last_progress() - _read_position;
-    result = std::max<std::int64_t>(result, 0);
-    result = std::min<std::int64_t>(result, buffer_frames());
+    if (result < 0) {
+      result = 0;
+    } else if (result > buffer_frames()) {
+      result = buffer_frames();
+    }
     return result;
   }
 
-  std::int64_t pro_position() const { return _read_position + extra_latency(); }
-
+  /*!
+   * \brief Calculate next wakeup time.
+   * \param sync_frames Required sync event (e.g. buffer end), in frame time.
+   * \return Suggested and safe wakeup time for next process(), in frame time.
+   */
   std::int64_t wakeup_time(std::int64_t sync_frames) const {
     return Channel::wakeup_time(sync_frames, oss_available());
   }
 
+  /*!
+   * \brief Check OSS progress and read recorded audio to the buffer.
+   * \param buffer Buffer to write to, untouched if invalid.
+   * \param end Buffer end position, matching channel progress.
+   * \param now Current time in frame time, see FrameClock.
+   * \return True if successful, false means there was an error.
+   */
   bool process(Buffer &buffer, std::int64_t end, std::int64_t now) {
     if (map()) {
       return (progress_done(now) || check_map_progress(now)) &&
@@ -44,8 +86,10 @@ public:
   }
 
 protected:
+  // Indicate that OSS progress has already been checked.
   bool progress_done(std::int64_t now) { return (last_processing() == now); }
 
+  // Check OSS progress in case of memory mapped buffer.
   bool check_map_progress(std::int64_t now) {
     // Get OSS progress through map pointer.
     if (get_rec_pointer()) {
@@ -62,6 +106,7 @@ protected:
     return progress_done(now);
   }
 
+  // Read recorded audio data to buffer, in case of memory mapped OSS buffer.
   bool process_mapped(Buffer &buffer, std::int64_t end, std::int64_t now) {
     // Calculate current read buffer position.
     std::int64_t position = buffer_position(buffer, end);
@@ -84,13 +129,12 @@ protected:
         position -= rewind;
       }
     }
-    if (position >= oldest && position < last_progress() &&
-        buffer.remaining() > 0) {
+    if (position >= oldest && position < last_progress() && !buffer.done()) {
       // Read from offset up to current position, if read buffer can hold it.
       std::int64_t offset = last_progress() - position;
       std::size_t length = buffer.remaining(offset * frame_size());
       unsigned pointer = (_oss_progress - offset) % buffer_frames();
-      length = map_read(buffer.position(), pointer * frame_size(), length);
+      length = read_map(buffer.position(), pointer * frame_size(), length);
       buffer.advance(length);
       _read_position = buffer_position(buffer, end);
     }
@@ -98,6 +142,7 @@ protected:
     return true;
   }
 
+  // Check progress when using I/O read() system call.
   bool check_read_progress(std::int64_t now) {
     // Check for OSS buffer overruns.
     std::int64_t overdue = now - estimated_dropout(oss_available());
@@ -117,6 +162,7 @@ protected:
     return progress_done(now);
   }
 
+  // Read recorded audio data to buffer, using I/O read() syscall.
   bool process_read(Buffer &buffer, std::int64_t end, std::int64_t now) {
     bool ok = true;
     std::int64_t position = buffer_position(buffer, end);
@@ -139,14 +185,14 @@ protected:
       std::int64_t gap = position - _read_position;
       std::size_t read_limit = buffer.remaining(gap * frame_size());
       std::size_t bytes_read = 0;
-      ok = non_blocking_read(buffer.position(), read_limit, bytes_read);
+      ok = read_io(buffer.position(), read_limit, bytes_read);
       Log::info(SOSSO_LOC, "@%lld - %lld Read buffer gap %lld, drain %lu.", now,
                 end, gap, bytes_read / frame_size());
       _read_position += bytes_read / frame_size();
     } else if (position == _read_position) {
       // Read as much as currently available.
       std::size_t bytes_read = 0;
-      ok = non_blocking_read(buffer.position(), buffer.remaining(), bytes_read);
+      ok = read_io(buffer.position(), buffer.remaining(), bytes_read);
       _read_position += bytes_read / frame_size();
       buffer.advance(bytes_read);
     }
@@ -155,54 +201,20 @@ protected:
   }
 
 private:
+  // Calculate read position of the remaining buffer.
   std::int64_t buffer_position(const Buffer &buffer, std::int64_t end) const {
     return end - extra_latency() - (buffer.remaining() / frame_size());
   }
 
+  // Indicate that a buffer doesn't need further processing.
   bool buffer_done(const Buffer &buffer, std::int64_t end) const {
     return buffer.done() && buffer_position(buffer, end) <= _read_position;
   }
 
+  // Extra latency to always finish on time, regardless of OSS progress steps.
   std::int64_t extra_latency() const { return max_progress(); }
 
-  bool non_blocking_read(char *buffer, std::size_t limit,
-                         std::size_t &progress) {
-    if (buffer && limit > 0) {
-      ssize_t result = ::read(file_descriptor(), buffer, limit);
-      if (result >= 0) {
-        progress += result;
-      } else if (errno == EAGAIN) {
-        progress += 0;
-      } else {
-        Log::warn(SOSSO_LOC, "Data read failed with %d.", errno);
-        return false;
-      }
-    }
-    return true;
-  }
-
-  std::size_t map_read(char *dest, std::size_t pointer, std::size_t length) {
-    std::size_t bytes_read = 0;
-    if (length > 0) {
-      // Sanitize pointer and length parameters.
-      pointer = pointer % buffer_size();
-      if (length > buffer_size()) {
-        length = buffer_size();
-      }
-      if (pointer + length > buffer_size()) {
-        // Read across buffer cycle boundary, write until buffer end first.
-        bytes_read = map_read(dest, pointer, buffer_size() - pointer);
-        length -= bytes_read;
-        dest += bytes_read;
-        pointer = 0;
-      }
-      // Read remaining data.
-      std::memcpy(dest, map() + pointer, length);
-      bytes_read += length;
-    }
-    return bytes_read;
-  }
-
+  // Avoid stalled buffers with irregular OSS progress in freewheel mode.
   std::int64_t freewheel_finish(Buffer &buffer, std::int64_t end,
                                 std::int64_t now) {
     std::int64_t advance = 0;
@@ -216,6 +228,7 @@ private:
     return advance;
   }
 
+  // Skip reading part of the buffer to match OSS read position.
   std::int64_t buffer_advance(Buffer &buffer, std::int64_t frames) {
     if (frames > 0) {
       std::size_t skip = buffer.remaining(frames * frame_size());
@@ -225,6 +238,7 @@ private:
     return 0;
   }
 
+  // Rewind part of the buffer to match OSS read position.
   std::int64_t buffer_rewind(Buffer &buffer, std::int64_t frames) {
     if (frames > 0) {
       return buffer.rewind(frames * frame_size()) / frame_size();
@@ -232,8 +246,8 @@ private:
     return 0;
   }
 
-  std::int64_t _oss_progress = 0;
-  std::int64_t _read_position = 0;
+  std::int64_t _oss_progress = 0;  // Last memory mapped OSS progress.
+  std::int64_t _read_position = 0; // Current read position of channel.
 };
 
 } // namespace sosso
