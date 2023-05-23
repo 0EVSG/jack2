@@ -278,11 +278,12 @@ bool JackOSSChannel::StartChannels(unsigned int buffer_frames)
         return false;
     }
 
-    // TODO: Improve correction limits for border cases.
-    std::int64_t limit = buffer_frames / 2;
-    fCorrection.set_loss_limits(-limit, limit);
-    limit = limit / 2;
+    // Small drift corrections to keep latency whithin +/- 1ms.
+    std::int64_t limit = fFrameClock.sample_rate() / 1000;
     fCorrection.set_drift_limits(-limit, limit);
+    // Drastic corrections when drift exceeds half a period.
+    limit = std::max<std::int64_t>(limit, buffer_frames / 2);
+    fCorrection.set_loss_limits(-limit, limit);
 
     SignalWork();
 
