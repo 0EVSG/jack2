@@ -157,7 +157,11 @@ int JackOSSDriver::Close()
         fclose(file);
     }
 #endif
+
+    fChannel.Lock();
     fChannel.StopAssistThread();
+    fChannel.Unlock();
+
     int res = JackAudioDriver::Close();
     CloseAux();
     return res;

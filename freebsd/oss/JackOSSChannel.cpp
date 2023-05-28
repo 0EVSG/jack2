@@ -323,6 +323,7 @@ bool JackOSSChannel::StartAssistThread(bool realtime, int priority)
 bool JackOSSChannel::StopAssistThread()
 {
     if (fAssistThread.GetStatus() != JackThread::kIdle) {
+        SignalWork();
         fAssistThread.Kill();
     }
     return true;
