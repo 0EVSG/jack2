@@ -19,6 +19,7 @@ Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 
 #include "JackOSSChannel.h"
 #include "JackError.h"
+#include "JackThread.h"
 #include "memops.h"
 
 #include <cstdint>
@@ -323,8 +324,9 @@ bool JackOSSChannel::StartAssistThread(bool realtime, int priority)
 bool JackOSSChannel::StopAssistThread()
 {
     if (fAssistThread.GetStatus() != JackThread::kIdle) {
+        fAssistThread.SetStatus(JackThread::kIdle);
         SignalWork();
-        fAssistThread.Kill();
+        fAssistThread.Stop();
     }
     return true;
 }
@@ -401,20 +403,20 @@ bool JackOSSChannel::Init()
 
 bool JackOSSChannel::Execute()
 {
-    if (Lock() && CheckTimeAndRun()) {
-        if (fReadChannel.total_finished(fFrameStamp) && fWriteChannel.total_finished(fFrameStamp)) {
-            jack_info("JackOSSChannel::Execute waiting for work.");
-            fMutex.Wait();
-            jack_info("JackOSSChannel::Execute resuming work.");
-            return Unlock();
+    if (Lock()) {
+        if (fAssistThread.GetStatus() != JackThread::kIdle && CheckTimeAndRun()) {
+            std::int64_t wakeup = NextWakeup();
+            if (fReadChannel.total_finished(fFrameStamp) && fWriteChannel.total_finished(fFrameStamp)) {
+                // Nothing to do, wait on the mutex for work.
+                jack_info("JackOSSChannel::Execute waiting for work.");
+                fMutex.Wait();
+                jack_info("JackOSSChannel::Execute resuming work.");
+            } else if (fFrameStamp < wakeup) {
+                // Unlock mutex before going to sleep, let others process.
+                return Unlock() && fFrameClock.sleep(wakeup);
+            }
         }
-        std::int64_t wakeup = NextWakeup();
-        if (fFrameStamp >= wakeup) {
-            return Unlock();
-        } else {
-            // Unlock mutex before going to sleep, let others process.
-            return Unlock() && fFrameClock.sleep(wakeup);
-        }
+        return Unlock();
     }
     return false;
 }
