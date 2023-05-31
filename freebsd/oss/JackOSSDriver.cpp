@@ -27,11 +27,6 @@ Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 #include "JackTime.h"
 
 #include <cstdint>
-#include <sys/ioctl.h>
-#include <sys/soundcard.h>
-#include <fcntl.h>
-#include <iostream>
-#include <assert.h>
 #include <stdio.h>
 
 using namespace std;

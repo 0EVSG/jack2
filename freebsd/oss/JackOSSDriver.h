@@ -23,11 +23,6 @@ Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 
 #include "JackAudioDriver.h"
 #include "JackOSSChannel.h"
-#include "sosso/Correction.hpp"
-#include "sosso/DoubleBuffer.hpp"
-#include "sosso/FrameClock.hpp"
-#include "sosso/ReadChannel.hpp"
-#include "sosso/WriteChannel.hpp"
 
 namespace Jack
 {
