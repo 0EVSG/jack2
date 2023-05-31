@@ -431,6 +431,17 @@ std::int64_t JackOSSChannel::XRunGap() const
     return 0;
 }
 
+void JackOSSChannel::ResetBuffers(std::int64_t offset)
+{
+    // Clear buffers and offset their positions, after processing gaps.
+    if (fReadChannel.recording()) {
+        fReadChannel.reset_buffers(fReadChannel.end_frames() + offset);
+    }
+    if (fWriteChannel.playback()) {
+        fWriteChannel.reset_buffers(fWriteChannel.end_frames() + offset);
+    }
+}
+
 std::int64_t JackOSSChannel::NextWakeup() const
 {
     return std::min(fReadChannel.wakeup_time(fFrameStamp), fWriteChannel.wakeup_time(fFrameStamp));

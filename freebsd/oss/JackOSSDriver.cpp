@@ -253,14 +253,10 @@ int JackOSSDriver::Read()
     // Check for over- and underruns.
     if (fChannel.XRunGap() > 0) {
         std::int64_t skip = fChannel.XRunGap() + fEngineControl->fBufferSize;
-        // TODO: Check if we can map "fFrameStamp" to absolute time in microsecons.
-        jack_time_t time_us = GetMicroSeconds();
-        jack_time_t frame_us = fChannel.FrameClock().frames_to_absolute_us(fChannel.FrameStamp());
-        NotifyXRun(time_us, (float)(fChannel.FrameClock().frames_to_time(skip) / 1000));
+        NotifyXRun(GetMicroSeconds(), (float) (fChannel.FrameClock().frames_to_time(skip) / 1000));
         fCycleEnd += skip;
-        jack_error("JackOSSDriver::Read(): Late by %lld frames, XRun. Time %lu vs Frame %lu us.", skip, time_us, frame_us);
-        fChannel.Capture().reset_buffers(fChannel.Capture().end_frames() + skip);
-        fChannel.Playback().reset_buffers(fChannel.Playback().end_frames() + skip);
+        jack_error("JackOSSDriver::Read(): XRun, late by %lld frames.", skip);
+        fChannel.ResetBuffers(skip);
     }
 
     // Wait and process channels until read, or else write, buffer is finished.

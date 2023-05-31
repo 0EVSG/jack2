@@ -117,6 +117,8 @@ class JackOSSChannel : public JackRunnableInterface
 
         std::int64_t XRunGap() const;
 
+        void ResetBuffers(std::int64_t offset);
+
         std::int64_t FrameStamp() const
         {
             return fFrameStamp;
