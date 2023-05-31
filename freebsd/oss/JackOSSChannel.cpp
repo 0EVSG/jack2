@@ -326,7 +326,7 @@ bool JackOSSChannel::StopAssistThread()
     if (fAssistThread.GetStatus() != JackThread::kIdle) {
         fAssistThread.SetStatus(JackThread::kIdle);
         SignalWork();
-        fAssistThread.Stop();
+        fAssistThread.Kill();
     }
     return true;
 }
@@ -409,7 +409,7 @@ bool JackOSSChannel::Execute()
             if (fReadChannel.total_finished(fFrameStamp) && fWriteChannel.total_finished(fFrameStamp)) {
                 // Nothing to do, wait on the mutex for work.
                 jack_info("JackOSSChannel::Execute waiting for work.");
-                fMutex.Wait();
+                fMutex.TimedWait(3000000);
                 jack_info("JackOSSChannel::Execute resuming work.");
             } else if (fFrameStamp < wakeup) {
                 // Unlock mutex before going to sleep, let others process.
