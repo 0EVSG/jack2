@@ -247,7 +247,7 @@ int JackOSSDriver::Read()
     if (fChannel.FrameStamp() - fLastRun > fMaxRunGap) {
         fMaxRunGap = fChannel.FrameStamp() - fLastRun;
         std::int64_t channel_gap = fChannel.FrameStamp() - channel_stamp;
-        jack_info("JackOSSDriver::Read max run gap %lld frames vs channel %lld.", fMaxRunGap, channel_gap);
+        jack_log("JackOSSDriver::Read max run gap %lld frames vs channel %lld.", fMaxRunGap, channel_gap);
     }
 
     // Check for over- and underruns.
@@ -327,7 +327,7 @@ int JackOSSDriver::Write()
     if (fChannel.FrameStamp() - fLastRun > fMaxRunGap) {
         fMaxRunGap = fChannel.FrameStamp() - fLastRun;
         std::int64_t channel_gap = fChannel.FrameStamp() - channel_stamp;
-        jack_info("JackOSSDriver::Write max run gap %lld frames vs channel %lld.", fMaxRunGap, channel_gap);
+        jack_log("JackOSSDriver::Write max run gap %lld frames vs channel %lld.", fMaxRunGap, channel_gap);
     }
 
     // Wait and process channels until write buffer is finished.
